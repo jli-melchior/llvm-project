@@ -443,6 +443,30 @@ bool TargetRegisterInfo::getRegAllocationHints(
   return false;
 }
 
+void TargetRegisterInfo::applyRegAllocationAntiHints(
+    Register VirtReg, ArrayRef<MCPhysReg> &Order,
+    SmallVectorImpl<MCPhysReg> &OrderStorage,
+    SmallVector<MCPhysReg, 16> &AntiHints, const MachineFunction &MF,
+    const VirtRegMap *VRM, const LiveRegMatrix *Matrix) const {
+
+  if (AntiHints.empty() || !VRM)
+    return;
+
+  auto isAntiHinted = [&](MCPhysReg Reg) {
+    return std::any_of(
+        AntiHints.begin(), AntiHints.end(),
+        [&](MCPhysReg AntiHint) { return regsOverlap(Reg, AntiHint); });
+  };
+
+  OrderStorage.clear();
+  OrderStorage.assign(Order.begin(), Order.end());
+
+  std::stable_partition(OrderStorage.begin(), OrderStorage.end(),
+                        [&](MCPhysReg Reg) { return !isAntiHinted(Reg); });
+
+  Order = OrderStorage;
+}
+
 bool TargetRegisterInfo::isCalleeSavedPhysReg(
     MCRegister PhysReg, const MachineFunction &MF) const {
   if (!PhysReg)

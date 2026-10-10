@@ -42,6 +42,7 @@
 namespace llvm {
 
 class PSetIterator;
+class VirtRegMap;
 
 /// Convenient type to represent either a register class or a register bank.
 using RegClassOrRegBank =
@@ -114,6 +115,11 @@ private:
   IndexedMap<std::pair<unsigned, SmallVector<Register, 4>>,
              VirtReg2IndexFunctor>
       RegAllocHints;
+
+  /// AntiHintRegs - For each virtual register, keeps a vector of virtual
+  /// registers that should NOT be allocated to the same or overlapping physical
+  /// registers.
+  IndexedMap<SmallVector<Register, 4>, VirtReg2IndexFunctor> AntiHintRegs;
 
   /// Hold the register properties that are used to populate the VirtRegMap
   /// pass when deserializing from .mir files.
@@ -898,6 +904,46 @@ public:
     assert(VReg.isVirtual());
     return RegAllocHints.inBounds(VReg) ? &RegAllocHints[VReg] : nullptr;
   }
+
+  void addRegAllocAntiHint(Register VReg, Register AntiHintVReg) {
+    assert(VReg.isVirtual() && "Anti-hints are only for virtual registers");
+    assert(AntiHintVReg.isVirtual() && "Anti-hint target must be virtual");
+    AntiHintRegs.grow(VReg);
+    SmallVector<Register, 4> &AntiHints = AntiHintRegs[VReg];
+    if (llvm::find(AntiHints, AntiHintVReg) == AntiHints.end())
+      AntiHints.push_back(AntiHintVReg);
+  }
+
+  void addRegAllocationAntiHints(Register VReg,
+                                 ArrayRef<Register> AntiHintVRegs) {
+    for (Register AntiHint : AntiHintVRegs)
+      addRegAllocAntiHint(VReg, AntiHint);
+  }
+
+  void clearRegAllocationAntiHints(Register VReg) {
+    assert(VReg.isVirtual());
+    if (AntiHintRegs.inBounds(VReg))
+      AntiHintRegs[VReg].clear();
+  }
+
+  ArrayRef<Register> getRegAllocationAntiHints(Register VReg) const {
+    assert(VReg.isVirtual());
+    if (!AntiHintRegs.inBounds(VReg))
+      return ArrayRef<Register>();
+    return AntiHintRegs[VReg];
+  }
+
+  bool hasRegAllocationAntiHint(Register VReg, Register AntiHintVReg) const {
+    assert(VReg.isVirtual() && AntiHintVReg.isVirtual());
+    if (!AntiHintRegs.inBounds(VReg))
+      return false;
+    const SmallVector<Register, 4> &AntiHints = AntiHintRegs[VReg];
+    return llvm::find(AntiHints, AntiHintVReg) != AntiHints.end();
+  }
+
+  void getPhysRegAntiHints(Register VReg,
+                           SmallVectorImpl<MCPhysReg> &PhysAntiHints,
+                           const VirtRegMap &VRM) const;
 
   /// markUsesInDebugValueAsUndef - Mark every DBG_VALUE referencing the
   /// specified register as undefined which causes the DBG_VALUE to be

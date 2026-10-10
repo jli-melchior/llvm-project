@@ -20,6 +20,7 @@
 #include "llvm/CodeGen/TargetInstrInfo.h"
 #include "llvm/CodeGen/TargetRegisterInfo.h"
 #include "llvm/CodeGen/TargetSubtargetInfo.h"
+#include "llvm/CodeGen/VirtRegMap.h"
 #include "llvm/Config/llvm-config.h"
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/DebugLoc.h"
@@ -673,6 +674,26 @@ bool MachineRegisterInfo::isReservedRegUnit(MCRegUnit Unit) const {
       return true;
   }
   return false;
+}
+
+void MachineRegisterInfo::getPhysRegAntiHints(
+    Register VReg, SmallVectorImpl<MCPhysReg> &PhysAntiHints,
+    const VirtRegMap &VRM) const {
+  assert(VReg.isVirtual());
+  if (!AntiHintRegs.inBounds(VReg))
+    return;
+
+  const SmallVector<Register, 4> &AntiHints = AntiHintRegs[VReg];
+
+  for (Register AntiHintVReg : AntiHints) {
+    if (VRM.hasPhys(AntiHintVReg)) {
+      MCPhysReg PhysReg = VRM.getPhys(AntiHintVReg);
+      PhysAntiHints.push_back(PhysReg);
+    }
+  }
+
+  llvm::sort(PhysAntiHints);
+  PhysAntiHints.erase(llvm::unique(PhysAntiHints), PhysAntiHints.end());
 }
 
 void MachineRegisterInfo::updateDbgUsersToReg(
