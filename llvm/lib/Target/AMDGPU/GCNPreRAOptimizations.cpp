@@ -55,6 +55,36 @@ static cl::opt<unsigned>
                          cl::desc("Lookback window for VA_VDST anti-hints"),
                          cl::init(32));
 
+static cl::opt<bool>
+    EnableAntiHintsForAddr("amdgpu-anti-hints-for-addr", cl::Hidden,
+                           cl::desc("Enable Anti-Hints between memory address "
+                                    "operands and subsequent VGPR writes to "
+                                    "avoid wait xcnt"),
+                           cl::init(true));
+
+static cl::opt<unsigned>
+    AddrAntiHintWindow("amdgpu-addr-anti-hint-window", cl::Hidden,
+                       cl::desc("Window size for address anti-hints"),
+                       cl::init(16));
+
+static cl::opt<bool>
+    EnableSameBankHints("amdgpu-same-bank-hints", cl::Hidden,
+                        cl::desc("Enable same-bank RA hints for "
+                                 "ds_load to VALU/WMMA def-use chains"),
+                        cl::init(true));
+
+static cl::opt<bool> PreserveExplicitBankHints(
+    "amdgpu-preserve-explicit-bank-hints",
+    cl::desc("Do not replace explicit BankHint values with SameBank hints"),
+    cl::Hidden, cl::init(false));
+
+static bool canSetSameBankHint(const MachineRegisterInfo &MRI, Register Reg) {
+  unsigned Kind = MRI.getRegAllocationHint(Reg).first;
+  if (Kind == AMDGPURI::StrictBankHint)
+    return false;
+  return !PreserveExplicitBankHints || Kind != AMDGPURI::BankHint;
+}
+
 namespace {
 
 class GCNPreRAOptimizationsImpl {
@@ -401,6 +431,108 @@ bool GCNPreRAOptimizationsImpl::run(MachineFunction &MF) {
                 continue;
               MRI->addRegAllocationAntiHints(DSDestReg, VALUSrcReg);
               MRI->addRegAllocationAntiHints(VALUSrcReg, DSDestReg);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // Add anti-hints between address operands of non-DS memory instructions
+  // (global/buffer loads) and subsequent VGPR writes. This helps avoid
+  // wait xcnt instructions that would otherwise be needed when a subsequent
+  // instruction overwrites the address register before the memory operation
+  // completes.
+  if (EnableAntiHintsForAddr && ST.hasGFX1250Insts()) {
+    const unsigned LookbackWindow = AddrAntiHintWindow;
+
+    for (const MachineBasicBlock &MBB : MF) {
+      SmallVector<Register, 64> RecentAddrRegs;
+
+      for (const MachineInstr &MI : MBB) {
+        if (MI.isDebugInstr())
+          continue;
+
+        bool IsNonDSMemOp = TII->isFLAT(MI) || TII->isFLATGlobal(MI) ||
+                            TII->isFLATScratch(MI) || TII->isVMEM(MI);
+
+        if (IsNonDSMemOp) {
+          if (const MachineOperand *VAddr =
+                  TII->getNamedOperand(MI, AMDGPU::OpName::vaddr)) {
+            if (VAddr->isReg() && VAddr->getReg().isVirtual()) {
+              Register AddrReg = VAddr->getReg();
+              const TargetRegisterClass *RC = MRI->getRegClass(AddrReg);
+              if (TRI->hasVGPRs(RC)) {
+                if (!llvm::is_contained(RecentAddrRegs, AddrReg)) {
+                  RecentAddrRegs.push_back(AddrReg);
+                  if (RecentAddrRegs.size() > LookbackWindow)
+                    RecentAddrRegs.erase(RecentAddrRegs.begin());
+                }
+              }
+            }
+          }
+          continue;
+        }
+
+        if (RecentAddrRegs.empty())
+          continue;
+
+        for (const MachineOperand &MO : MI.defs()) {
+          if (!MO.isReg() || !MO.getReg().isVirtual())
+            continue;
+          Register DefReg = MO.getReg();
+          const TargetRegisterClass *RC = MRI->getRegClass(DefReg);
+          if (!TRI->hasVGPRs(RC))
+            continue;
+
+          for (Register AddrReg : RecentAddrRegs) {
+            if (AddrReg == DefReg)
+              continue;
+            MRI->addRegAllocationAntiHints(DefReg, AddrReg);
+            MRI->addRegAllocationAntiHints(AddrReg, DefReg);
+          }
+        }
+      }
+    }
+  }
+
+  // Add same-bank RA hints for ds_load -> VALU/WMMA def-use chains.
+  // When a ds_load destination and a VALU/WMMA consumer's other VGPR
+  // sources are in different banks, additional s_set_vgpr_msb switches
+  // are needed. Hinting the ds_load dest to share a bank with the
+  // consumer's other sources reduces this overhead.
+  if (EnableSameBankHints && ST.hasGFX1250Insts()) {
+    for (const MachineBasicBlock &MBB : MF) {
+      for (const MachineInstr &MI : MBB) {
+        if (!TII->isDS(MI) || !MI.mayLoad())
+          continue;
+
+        for (const MachineOperand &DefMO : MI.defs()) {
+          if (!DefMO.isReg() || !DefMO.getReg().isVirtual())
+            continue;
+          Register DSDestReg = DefMO.getReg();
+          const TargetRegisterClass *RC = MRI->getRegClass(DSDestReg);
+          if (!TRI->hasVGPRs(RC))
+            continue;
+
+          for (MachineOperand &UseMO : MRI->use_operands(DSDestReg)) {
+            const MachineInstr *UserMI = UseMO.getParent();
+            if (!SIInstrInfo::isVALU(*UserMI, /*AllowLDSDMA=*/true))
+              continue;
+
+            for (const MachineOperand &SrcMO : UserMI->uses()) {
+              if (!SrcMO.isReg() || !SrcMO.getReg().isVirtual())
+                continue;
+              if (SrcMO.getReg() == DSDestReg)
+                continue;
+              const TargetRegisterClass *SrcRC =
+                  MRI->getRegClass(SrcMO.getReg());
+              if (!TRI->hasVGPRs(SrcRC))
+                continue;
+
+              if (canSetSameBankHint(*MRI, DSDestReg))
+                MRI->setRegAllocationHint(DSDestReg, AMDGPURI::SameBank,
+                                          SrcMO.getReg());
             }
           }
         }
