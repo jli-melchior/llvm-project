@@ -467,6 +467,34 @@ bool SemaAMDGPU::CheckAMDGCNBuiltinFunctionCall(unsigned BuiltinID,
     TheCall->setType(DataTy);
     return SemaRef.BuiltinConstantArgRange(TheCall, 1, 0, 3);
   }
+  case AMDGPU::BI__builtin_amdgcn_schedule_vgpr:
+  case AMDGPU::BI__builtin_amdgcn_schedule_sgpr:
+  case AMDGPU::BI__builtin_amdgcn_schedule_agpr: {
+    if (SemaRef.checkArgCountRange(TheCall, 2, 3))
+      return true;
+    Expr *DataArg = TheCall->getArg(0);
+    QualType DataTy = DataArg->getType();
+    if (DataTy->isAnyComplexType() ||
+        !(DataTy->isArithmeticType() ||
+          (DataTy->isVectorType() &&
+           DataTy->castAs<VectorType>()
+               ->getElementType()
+               ->isArithmeticType()))) {
+      SemaRef.Diag(DataArg->getBeginLoc(),
+                   diag::err_typecheck_cond_expect_int_float)
+          << DataTy << DataArg->getSourceRange();
+      return true;
+    }
+    TheCall->setType(DataTy);
+    int MaxReg;
+    switch (BuiltinID) {
+    case AMDGPU::BI__builtin_amdgcn_schedule_vgpr: MaxReg = 1023; break;
+    case AMDGPU::BI__builtin_amdgcn_schedule_sgpr: MaxReg = 105;  break;
+    case AMDGPU::BI__builtin_amdgcn_schedule_agpr: MaxReg = 255;  break;
+    default: llvm_unreachable("unexpected builtin");
+    }
+    return SemaRef.BuiltinConstantArgRange(TheCall, 1, 0, MaxReg);
+  }
   default:
     return false;
   }
