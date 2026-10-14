@@ -455,6 +455,35 @@ llvm.func @rocdl.schedule.bank(%val : f32, %ival : i32) -> f32 {
   llvm.return %0 : f32
 }
 
+llvm.func @rocdl.schedule.vgpr(%val : f32, %ival : i32) -> f32 {
+  // CHECK-LABEL: rocdl.schedule.vgpr
+  // strict (default): regnum 42, strict 1
+  // CHECK: call float @llvm.amdgcn.schedule.vgpr.f32(float %{{.*}}, i32 42, i32 1)
+  %0 = rocdl.schedule.vgpr %val, 42 : f32
+  // soft: regnum 10, strict 0
+  // CHECK: call i32 @llvm.amdgcn.schedule.vgpr.i32(i32 %{{.*}}, i32 10, i32 0)
+  %1 = rocdl.schedule.vgpr %ival, 10 soft : i32
+  llvm.return %0 : f32
+}
+
+llvm.func @rocdl.schedule.sgpr(%val : f32, %ival : i32) -> f32 {
+  // CHECK-LABEL: rocdl.schedule.sgpr
+  // CHECK: call float @llvm.amdgcn.schedule.sgpr.f32(float %{{.*}}, i32 20, i32 1)
+  %0 = rocdl.schedule.sgpr %val, 20 : f32
+  // CHECK: call i32 @llvm.amdgcn.schedule.sgpr.i32(i32 %{{.*}}, i32 5, i32 0)
+  %1 = rocdl.schedule.sgpr %ival, 5 soft : i32
+  llvm.return %0 : f32
+}
+
+llvm.func @rocdl.schedule.agpr(%val : f32, %ival : i32) -> f32 {
+  // CHECK-LABEL: rocdl.schedule.agpr
+  // CHECK: call float @llvm.amdgcn.schedule.agpr.f32(float %{{.*}}, i32 8, i32 1)
+  %0 = rocdl.schedule.agpr %val, 8 : f32
+  // CHECK: call i32 @llvm.amdgcn.schedule.agpr.i32(i32 %{{.*}}, i32 0, i32 0)
+  %1 = rocdl.schedule.agpr %ival, 0 soft : i32
+  llvm.return %0 : f32
+}
+
 llvm.func @rocdl.xdlops(%arg0 : f32, %arg1 : f32,
                    %arg2 : vector<32 x f32>, %arg3: i32,
                    %arg4 : vector<16 x f32>, %arg5 : vector<4xf32>,

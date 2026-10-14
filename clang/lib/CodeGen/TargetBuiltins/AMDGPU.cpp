@@ -2276,6 +2276,32 @@ Value *CodeGenFunction::EmitAMDGPUBuiltinExpr(unsigned BuiltinID,
                                          Val->getType());
     return Builder.CreateCall(F, {Val, EncodedBank});
   }
+  case AMDGPU::BI__builtin_amdgcn_schedule_vgpr:
+  case AMDGPU::BI__builtin_amdgcn_schedule_sgpr:
+  case AMDGPU::BI__builtin_amdgcn_schedule_agpr: {
+    llvm::Value *Val = EmitScalarExpr(E->getArg(0));
+    llvm::Value *RegNum = EmitScalarExpr(E->getArg(1));
+    llvm::Value *Strict;
+    if (E->getNumArgs() > 2) {
+      Strict = EmitScalarExpr(E->getArg(2));
+      Strict = Builder.CreateZExt(Strict, RegNum->getType());
+    } else {
+      // Default: strict
+      Strict = Builder.getInt32(1);
+    }
+    Intrinsic::ID IID;
+    switch (BuiltinID) {
+    case AMDGPU::BI__builtin_amdgcn_schedule_vgpr:
+      IID = Intrinsic::amdgcn_schedule_vgpr; break;
+    case AMDGPU::BI__builtin_amdgcn_schedule_sgpr:
+      IID = Intrinsic::amdgcn_schedule_sgpr; break;
+    case AMDGPU::BI__builtin_amdgcn_schedule_agpr:
+      IID = Intrinsic::amdgcn_schedule_agpr; break;
+    default: llvm_unreachable("unexpected builtin");
+    }
+    llvm::Function *F = CGM.getIntrinsic(IID, Val->getType());
+    return Builder.CreateCall(F, {Val, RegNum, Strict});
+  }
   default:
     return nullptr;
   }

@@ -176,6 +176,30 @@ func.func @rocdl_schedule_bank(%val : f32, %ival : i32) -> f32 {
   llvm.return %0 : f32
 }
 
+func.func @rocdl_schedule_vgpr(%val : f32, %ival : i32) -> f32 {
+  // CHECK: rocdl.schedule.vgpr %{{.*}}, 42 : f32
+  %0 = rocdl.schedule.vgpr %val, 42 : f32
+  // CHECK: rocdl.schedule.vgpr %{{.*}}, 10 soft : i32
+  %1 = rocdl.schedule.vgpr %ival, 10 soft : i32
+  llvm.return %0 : f32
+}
+
+func.func @rocdl_schedule_sgpr(%val : f32, %ival : i32) -> f32 {
+  // CHECK: rocdl.schedule.sgpr %{{.*}}, 20 : f32
+  %0 = rocdl.schedule.sgpr %val, 20 : f32
+  // CHECK: rocdl.schedule.sgpr %{{.*}}, 5 soft : i32
+  %1 = rocdl.schedule.sgpr %ival, 5 soft : i32
+  llvm.return %0 : f32
+}
+
+func.func @rocdl_schedule_agpr(%val : f32, %ival : i32) -> f32 {
+  // CHECK: rocdl.schedule.agpr %{{.*}}, 8 : f32
+  %0 = rocdl.schedule.agpr %val, 8 : f32
+  // CHECK: rocdl.schedule.agpr %{{.*}}, 0 soft : i32
+  %1 = rocdl.schedule.agpr %ival, 0 soft : i32
+  llvm.return %0 : f32
+}
+
 func.func @rocdl.setprio() {
   // CHECK: rocdl.s.setprio
   rocdl.s.setprio 0

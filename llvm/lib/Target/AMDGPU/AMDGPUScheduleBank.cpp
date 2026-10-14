@@ -7,19 +7,21 @@
 //===----------------------------------------------------------------------===//
 //
 /// \file
-/// Lower the V_SCHEDULE_BANK_B* pseudos produced from llvm.amdgcn.schedule.bank.
+/// Lower the V_SCHEDULE_BANK_B* pseudos produced from llvm.amdgcn.schedule.bank,
+/// and the V_SCHEDULE_VGPR_B*, S_SCHEDULE_SGPR_B*, A_SCHEDULE_AGPR_B* pseudos
+/// from llvm.amdgcn.schedule.{vgpr,sgpr,agpr}.
+///
 /// For each pseudo this pass:
-///   1. reads the requested bank (0-3) from the immediate operand,
-///   2. attaches an AMDGPURI::BankHint register allocation hint to the
-///      destination (and source) vreg so the allocator prefers that 256-register
-///      bank,
+///   1. reads the requested bank or register number from the immediate operand,
+///   2. attaches an appropriate register allocation hint to the destination
+///      (and source) vreg so the allocator prefers the target bank or register,
 ///   3. propagates the hint through COPY / REG_SEQUENCE / INSERT_SUBREG /
 ///      SUBREG_TO_REG so it survives coalescing, and
 ///   4. replaces the pseudo with a plain COPY.
 ///
 /// The hint is advisory: SIRegisterInfo::getRegAllocationHints only reorders the
-/// allocation candidates, so a full bank falls back to the default order and the
-/// pass never forces a spill.
+/// allocation candidates, so a full bank (or unavailable register) falls back to
+/// the default order and the pass never forces a spill.
 //
 //===----------------------------------------------------------------------===//
 
@@ -38,24 +40,42 @@ using namespace llvm;
 
 #define DEBUG_TYPE "amdgpu-schedule-bank"
 
-static bool isScheduleBankPseudo(unsigned Opcode) {
+/// Classification of schedule-hint pseudos.
+enum ScheduleHintKind { SHK_None, SHK_Bank, SHK_VGPR, SHK_SGPR, SHK_AGPR };
+
+static ScheduleHintKind getScheduleHintKind(unsigned Opcode) {
   switch (Opcode) {
   case AMDGPU::V_SCHEDULE_BANK_B32:
   case AMDGPU::V_SCHEDULE_BANK_B64:
   case AMDGPU::V_SCHEDULE_BANK_B128:
   case AMDGPU::V_SCHEDULE_BANK_B256:
-    return true;
+    return SHK_Bank;
+  case AMDGPU::V_SCHEDULE_VGPR_B32:
+  case AMDGPU::V_SCHEDULE_VGPR_B64:
+  case AMDGPU::V_SCHEDULE_VGPR_B128:
+  case AMDGPU::V_SCHEDULE_VGPR_B256:
+    return SHK_VGPR;
+  case AMDGPU::S_SCHEDULE_SGPR_B32:
+  case AMDGPU::S_SCHEDULE_SGPR_B64:
+  case AMDGPU::S_SCHEDULE_SGPR_B128:
+  case AMDGPU::S_SCHEDULE_SGPR_B256:
+    return SHK_SGPR;
+  case AMDGPU::A_SCHEDULE_AGPR_B32:
+  case AMDGPU::A_SCHEDULE_AGPR_B64:
+  case AMDGPU::A_SCHEDULE_AGPR_B128:
+  case AMDGPU::A_SCHEDULE_AGPR_B256:
+    return SHK_AGPR;
   default:
-    return false;
+    return SHK_None;
   }
 }
 
-/// Walk the SSA use chain of \p Reg and propagate the bank hint through
+/// Walk the SSA use chain of \p Reg and propagate the hint through
 /// value-preserving pseudos so the preference reaches the vregs that survive
 /// coalescing.
-static void propagateBankHint(MachineRegisterInfo &MRI, Register Reg,
-                              unsigned Bank, unsigned HintKind,
-                              SmallDenseSet<unsigned, 32> &Visited) {
+static void propagateHint(MachineRegisterInfo &MRI, Register Reg,
+                          unsigned HintValue, unsigned HintKind,
+                          SmallDenseSet<unsigned, 32> &Visited) {
   if (!Reg.isVirtual() || !Visited.insert(Reg.id()).second)
     return;
 
@@ -74,23 +94,20 @@ static void propagateBankHint(MachineRegisterInfo &MRI, Register Reg,
     if (!DefReg.isVirtual())
       continue;
 
-    // Do not clobber an existing, conflicting bank hint.
+    // Do not clobber an existing, conflicting hint.
     std::pair<unsigned, Register> Existing = MRI.getRegAllocationHint(DefReg);
     if (Existing.first != 0 &&
-        (Existing.first != HintKind || Existing.second != Bank))
+        (Existing.first != HintKind || Existing.second != HintValue))
       continue;
 
-    MRI.setRegAllocationHint(DefReg, HintKind, Bank);
-    propagateBankHint(MRI, DefReg, Bank, HintKind, Visited);
+    MRI.setRegAllocationHint(DefReg, HintKind, HintValue);
+    propagateHint(MRI, DefReg, HintValue, HintKind, Visited);
   }
 }
 
 // Shared implementation used by both the legacy and new-PM passes.
 static bool runScheduleBank(MachineFunction &MF) {
   const GCNSubtarget &ST = MF.getSubtarget<GCNSubtarget>();
-  if (!ST.has1024AddressableVGPRs())
-    return false;
-
   MachineRegisterInfo &MRI = MF.getRegInfo();
   const SIInstrInfo *TII = ST.getInstrInfo();
   bool Changed = false;
@@ -99,42 +116,98 @@ static bool runScheduleBank(MachineFunction &MF) {
 
   for (MachineBasicBlock &MBB : MF) {
     for (MachineInstr &MI : MBB) {
-      if (!isScheduleBankPseudo(MI.getOpcode()))
+      ScheduleHintKind Kind = getScheduleHintKind(MI.getOpcode());
+      if (Kind == SHK_None)
         continue;
 
       Register DstReg = MI.getOperand(0).getReg();
       const MachineOperand &SrcMO = MI.getOperand(1);
       Register SrcReg = SrcMO.getReg();
-      unsigned EncodedBank = MI.getOperand(2).getImm();
-      bool Strict = EncodedBank & 0x4;
-      unsigned Bank = EncodedBank & 0x3;
-      unsigned HintKind =
-          Strict ? AMDGPURI::StrictBankHint : AMDGPURI::BankHint;
 
-      // Bits 0..1 select bank; bit 2 requests strict allocation.
-      if (EncodedBank > 7) {
-        Bank = 0;
-        Strict = false;
+      unsigned HintKind;
+      unsigned HintValue;
+
+      if (Kind == SHK_Bank) {
+        // Bank pseudos are only valid on targets with 1024 addressable VGPRs.
+        if (!ST.has1024AddressableVGPRs()) {
+          // Replace with COPY and skip hint setup.
+          BuildMI(MBB, MI, MI.getDebugLoc(), TII->get(TargetOpcode::COPY),
+                  DstReg)
+              .addReg(SrcReg, getRegState(SrcMO), SrcMO.getSubReg());
+          ToErase.push_back(&MI);
+          Changed = true;
+          continue;
+        }
+
+        unsigned EncodedBank = MI.getOperand(2).getImm();
+        bool Strict = EncodedBank & 0x4;
+        unsigned Bank = EncodedBank & 0x3;
+
+        if (EncodedBank > 7) {
+          Bank = 0;
+          Strict = false;
+        }
+
+        HintKind = Strict ? AMDGPURI::StrictBankHint : AMDGPURI::BankHint;
+        HintValue = Bank;
+
+        LLVM_DEBUG(dbgs() << "  schedule.bank: " << printReg(DstReg) << " <- "
+                          << printReg(SrcReg) << " bank " << Bank
+                          << " strict " << Strict << '\n');
+      } else {
+        // Exact register pseudos: operand 2 = regnum, operand 3 = strict.
+        unsigned RegNum = MI.getOperand(2).getImm();
+        bool Strict = MI.getOperand(3).getImm() != 0;
+
+        switch (Kind) {
+        case SHK_VGPR:
+          HintKind = Strict ? AMDGPURI::StrictVGPRRegHint
+                            : AMDGPURI::VGPRRegHint;
+          break;
+        case SHK_SGPR:
+          HintKind = Strict ? AMDGPURI::StrictSGPRRegHint
+                            : AMDGPURI::SGPRRegHint;
+          break;
+        case SHK_AGPR:
+          HintKind = Strict ? AMDGPURI::StrictAGPRRegHint
+                            : AMDGPURI::AGPRRegHint;
+          break;
+        default:
+          llvm_unreachable("unexpected schedule hint kind");
+        }
+        HintValue = RegNum;
+
+        LLVM_DEBUG(dbgs() << "  schedule."
+                          << (Kind == SHK_VGPR   ? "vgpr"
+                              : Kind == SHK_SGPR ? "sgpr"
+                                                 : "agpr")
+                          << ": " << printReg(DstReg) << " <- "
+                          << printReg(SrcReg) << " reg " << RegNum
+                          << " strict " << Strict << '\n');
       }
 
-      LLVM_DEBUG(dbgs() << "  schedule.bank: " << printReg(DstReg) << " <- "
-                        << printReg(SrcReg) << " bank " << Bank
-                        << " strict " << Strict << '\n');
-
       // Hint both the destination and the source so the preference survives
-      // whichever side coalescing keeps.
+      // whichever side coalescing keeps. Don't overwrite a strict hint with a
+      // soft hint of the same category.
+      bool IsStrict = (HintKind == AMDGPURI::StrictBankHint ||
+                       HintKind == AMDGPURI::StrictVGPRRegHint ||
+                       HintKind == AMDGPURI::StrictSGPRRegHint ||
+                       HintKind == AMDGPURI::StrictAGPRRegHint);
+      // The strict variant is always HintKind | 1 for each category.
+      unsigned StrictVariant = HintKind | 1;
+
       if (DstReg.isVirtual() &&
-          (Strict || MRI.getRegAllocationHint(DstReg).first !=
-                         AMDGPURI::StrictBankHint))
-        MRI.setRegAllocationHint(DstReg, HintKind, Bank);
+          (IsStrict ||
+           MRI.getRegAllocationHint(DstReg).first != StrictVariant))
+        MRI.setRegAllocationHint(DstReg, HintKind, HintValue);
       if (SrcReg.isVirtual() &&
-          (Strict || MRI.getRegAllocationHint(SrcReg).first !=
-                         AMDGPURI::StrictBankHint))
-        MRI.setRegAllocationHint(SrcReg, HintKind, Bank);
+          (IsStrict ||
+           MRI.getRegAllocationHint(SrcReg).first != StrictVariant))
+        MRI.setRegAllocationHint(SrcReg, HintKind, HintValue);
 
       SmallDenseSet<unsigned, 32> Visited;
       if (DstReg.isVirtual())
-        propagateBankHint(MRI, DstReg, Bank, HintKind, Visited);
+        propagateHint(MRI, DstReg, HintValue, HintKind, Visited);
 
       // Replace the pseudo with a plain COPY.
       BuildMI(MBB, MI, MI.getDebugLoc(), TII->get(TargetOpcode::COPY), DstReg)
