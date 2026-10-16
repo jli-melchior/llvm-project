@@ -158,6 +158,8 @@ let isAsCheapAsAMove = 1, isReMaterializable = 1, hasSideEffects = 0,
                                             (ins VReg_128:$src, i32imm:$regnum, i32imm:$strict)>;
   def V_SCHEDULE_VGPR_B256 : VPseudoInstSI<(outs VReg_256:$vdst),
                                             (ins VReg_256:$src, i32imm:$regnum, i32imm:$strict)>;
+  def V_SCHEDULE_VGPR_B512 : VPseudoInstSI<(outs VReg_512:$vdst),
+                                            (ins VReg_512:$src, i32imm:$regnum, i32imm:$strict)>;
 }
 
 // 64-bit vector move instruction. This is mainly used by the
@@ -260,6 +262,8 @@ let isAsCheapAsAMove = 1, isReMaterializable = 1, hasSideEffects = 0,
                                             (ins SGPR_128:$src, i32imm:$regnum, i32imm:$strict)>;
   def S_SCHEDULE_SGPR_B256 : SPseudoInstSI<(outs SGPR_256:$sdst),
                                             (ins SGPR_256:$src, i32imm:$regnum, i32imm:$strict)>;
+  def S_SCHEDULE_SGPR_B512 : SPseudoInstSI<(outs SGPR_512:$sdst),
+                                            (ins SGPR_512:$src, i32imm:$regnum, i32imm:$strict)>;
 }
 
 // Exact AGPR register hint pseudos. Only valid on targets with MAI instructions.
@@ -273,6 +277,8 @@ let isAsCheapAsAMove = 1, isReMaterializable = 1, hasSideEffects = 0,
                                             (ins AReg_128:$src, i32imm:$regnum, i32imm:$strict)>;
   def A_SCHEDULE_AGPR_B256 : VPseudoInstSI<(outs AReg_256:$vdst),
                                             (ins AReg_256:$src, i32imm:$regnum, i32imm:$strict)>;
+  def A_SCHEDULE_AGPR_B512 : VPseudoInstSI<(outs AReg_512:$vdst),
+                                            (ins AReg_512:$src, i32imm:$regnum, i32imm:$strict)>;
 }
 
 def WWM_COPY : SPseudoInstSI <
