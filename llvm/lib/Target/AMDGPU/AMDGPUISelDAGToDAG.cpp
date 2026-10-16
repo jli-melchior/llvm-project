@@ -3362,6 +3362,7 @@ void AMDGPUDAGToDAGISel::SelectINTRINSIC_WO_CHAIN(SDNode *N) {
       case 64:  PseudoOpc = AMDGPU::V_SCHEDULE_VGPR_B64;  break;
       case 128: PseudoOpc = AMDGPU::V_SCHEDULE_VGPR_B128; break;
       case 256: PseudoOpc = AMDGPU::V_SCHEDULE_VGPR_B256; break;
+      case 512: PseudoOpc = AMDGPU::V_SCHEDULE_VGPR_B512; break;
       default:
         ReplaceUses(SDValue(N, 0), Src);
         CurDAG->RemoveDeadNode(N);
@@ -3373,6 +3374,7 @@ void AMDGPUDAGToDAGISel::SelectINTRINSIC_WO_CHAIN(SDNode *N) {
       case 64:  PseudoOpc = AMDGPU::S_SCHEDULE_SGPR_B64;  break;
       case 128: PseudoOpc = AMDGPU::S_SCHEDULE_SGPR_B128; break;
       case 256: PseudoOpc = AMDGPU::S_SCHEDULE_SGPR_B256; break;
+      case 512: PseudoOpc = AMDGPU::S_SCHEDULE_SGPR_B512; break;
       default:
         ReplaceUses(SDValue(N, 0), Src);
         CurDAG->RemoveDeadNode(N);
@@ -3384,6 +3386,7 @@ void AMDGPUDAGToDAGISel::SelectINTRINSIC_WO_CHAIN(SDNode *N) {
       case 64:  PseudoOpc = AMDGPU::A_SCHEDULE_AGPR_B64;  break;
       case 128: PseudoOpc = AMDGPU::A_SCHEDULE_AGPR_B128; break;
       case 256: PseudoOpc = AMDGPU::A_SCHEDULE_AGPR_B256; break;
+      case 512: PseudoOpc = AMDGPU::A_SCHEDULE_AGPR_B512; break;
       default:
         ReplaceUses(SDValue(N, 0), Src);
         CurDAG->RemoveDeadNode(N);

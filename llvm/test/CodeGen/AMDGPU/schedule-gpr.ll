@@ -7,6 +7,7 @@
 
 declare i32 @llvm.amdgcn.schedule.vgpr.i32(i32, i32, i32)
 declare i64 @llvm.amdgcn.schedule.vgpr.i64(i64, i32, i32)
+declare <16 x float> @llvm.amdgcn.schedule.vgpr.v16f32(<16 x float>, i32, i32)
 
 ; --------------------------------------------------------------------------
 ; schedule_vgpr: strict hint to v42
@@ -65,6 +66,18 @@ define amdgpu_kernel void @vgpr200_64(ptr addrspace(1) %out, i64 %x) #0 {
   %h = call i64 @llvm.amdgcn.schedule.vgpr.i64(i64 %x, i32 200, i32 1)
   %y = add i64 %h, 1
   store i64 %y, ptr addrspace(1) %out
+  ret void
+}
+
+; --------------------------------------------------------------------------
+; schedule_vgpr: 512-bit value (v16f32), strict hint to v[512:527]
+
+; GCN-LABEL: {{^}}vgpr512_v16f32:
+; GCN: v[512:527]
+define amdgpu_kernel void @vgpr512_v16f32(ptr addrspace(1) %out, ptr addrspace(1) %in) #0 {
+  %x = load <16 x float>, ptr addrspace(1) %in
+  %h = call <16 x float> @llvm.amdgcn.schedule.vgpr.v16f32(<16 x float> %x, i32 512, i32 1)
+  store <16 x float> %h, ptr addrspace(1) %out
   ret void
 }
 
