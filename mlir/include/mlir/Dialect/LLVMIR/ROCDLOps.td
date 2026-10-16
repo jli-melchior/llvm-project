@@ -810,9 +810,9 @@ def ROCDL_IglpOpt : ROCDL_ConcreteNonMemIntrOp<"iglp.opt", [], 0, [0], ["variant
 
 def ROCDL_ScheduleBankOp : ROCDL_IntrOp<"schedule.bank", [], [0],
     [AllTypesMatch<["res", "value"]>], 1, 0, 0, 0, [], []>,
-  Arguments<(ins LLVM_Type:$value, I32Attr:$bank,
+  Arguments<(ins AnyType:$value, I32Attr:$bank,
              OptionalAttr<UnitAttr>:$soft)> {
-  let results = (outs LLVM_Type:$res);
+  let results = (outs AnyType:$res);
   let assemblyFormat = [{
     $value `,` $bank (`soft` $soft^)? attr-dict `:` type($value)
   }];
@@ -847,9 +847,9 @@ def ROCDL_ScheduleBankOp : ROCDL_IntrOp<"schedule.bank", [], [0],
 class ROCDL_ScheduleGPROp<string mnemonic, string intrName, string gprKind>
   : ROCDL_IntrOp<mnemonic, [], [0],
     [AllTypesMatch<["res", "value"]>], 1, 0, 0, 0, [], []>,
-  Arguments<(ins LLVM_Type:$value, I32Attr:$regnum,
+  Arguments<(ins AnyType:$value, I32Attr:$regnum,
              OptionalAttr<UnitAttr>:$soft)> {
-  let results = (outs LLVM_Type:$res);
+  let results = (outs AnyType:$res);
   let assemblyFormat = [{
     $value `,` $regnum (`soft` $soft^)? attr-dict `:` type($value)
   }];
