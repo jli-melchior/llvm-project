@@ -2635,7 +2635,7 @@ Error AMDGPUCodeGenPassBuilder::addOptimizedRegAlloc(PassManagerWrapper &PMW) {
   return Base::addOptimizedRegAlloc(PMW);
 }
 
-void AMDGPUCodeGenPassBuilder::addPreRegAlloc(PassManagerWrapper &PMW) const {
+void AMDGPUCodeGenPassBuilder::addPreRegAlloc(PassManagerWrapper &PMW) {
   addMachineFunctionPass(AMDGPUSchedBankPass(), PMW);
   if (getOptLevel() != CodeGenOptLevel::None)
     addMachineFunctionPass(AMDGPUPrepareAGPRAllocPass(), PMW);
