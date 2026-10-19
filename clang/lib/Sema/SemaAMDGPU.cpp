@@ -448,7 +448,7 @@ bool SemaAMDGPU::CheckAMDGCNBuiltinFunctionCall(unsigned BuiltinID,
                                            /*High=*/0) ||
            SemaRef.BuiltinConstantArgRange(TheCall, /*ArgNum=*/2, /*Low=*/0,
                                            /*High=*/0);
-  case AMDGPU::BI__builtin_amdgcn_schedule_bank: {
+  case AMDGPU::BI__builtin_amdgcn_sched_bank: {
     if (SemaRef.checkArgCountRange(TheCall, 2, 3))
       return true;
     Expr *DataArg = TheCall->getArg(0);
@@ -467,9 +467,9 @@ bool SemaAMDGPU::CheckAMDGCNBuiltinFunctionCall(unsigned BuiltinID,
     TheCall->setType(DataTy);
     return SemaRef.BuiltinConstantArgRange(TheCall, 1, 0, 3);
   }
-  case AMDGPU::BI__builtin_amdgcn_schedule_vgpr:
-  case AMDGPU::BI__builtin_amdgcn_schedule_sgpr:
-  case AMDGPU::BI__builtin_amdgcn_schedule_agpr: {
+  case AMDGPU::BI__builtin_amdgcn_sched_vgpr:
+  case AMDGPU::BI__builtin_amdgcn_sched_sgpr:
+  case AMDGPU::BI__builtin_amdgcn_sched_agpr: {
     if (SemaRef.checkArgCountRange(TheCall, 2, 3))
       return true;
     Expr *DataArg = TheCall->getArg(0);
@@ -488,9 +488,9 @@ bool SemaAMDGPU::CheckAMDGCNBuiltinFunctionCall(unsigned BuiltinID,
     TheCall->setType(DataTy);
     int MaxReg;
     switch (BuiltinID) {
-    case AMDGPU::BI__builtin_amdgcn_schedule_vgpr: MaxReg = 1023; break;
-    case AMDGPU::BI__builtin_amdgcn_schedule_sgpr: MaxReg = 105;  break;
-    case AMDGPU::BI__builtin_amdgcn_schedule_agpr: MaxReg = 255;  break;
+    case AMDGPU::BI__builtin_amdgcn_sched_vgpr: MaxReg = 1023; break;
+    case AMDGPU::BI__builtin_amdgcn_sched_sgpr: MaxReg = 105;  break;
+    case AMDGPU::BI__builtin_amdgcn_sched_agpr: MaxReg = 255;  break;
     default: llvm_unreachable("unexpected builtin");
     }
     return SemaRef.BuiltinConstantArgRange(TheCall, 1, 0, MaxReg);

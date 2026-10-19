@@ -1,13 +1,13 @@
-# RUN: llc -mtriple=amdgcn -mcpu=gfx1250 -run-pass=amdgpu-schedule-bank -o - %s | FileCheck %s
+# RUN: llc -mtriple=amdgcn -mcpu=gfx1250 -run-pass=amdgpu-sched-bank -o - %s | FileCheck %s
 
-# The AMDGPUScheduleBank pass attaches a bank register-allocation hint (not
+# The AMDGPUSchedBank pass attaches a bank register-allocation hint (not
 # printed in MIR) and lowers each V_SCHEDULE_BANK_B* pseudo to a plain COPY.
 
 ---
-# CHECK-LABEL: name: lower_schedule_bank_b32
+# CHECK-LABEL: name: lower_sched_bank_b32
 # CHECK: %1:vgpr_32 = COPY %0
 # CHECK-NOT: V_SCHEDULE_BANK_B32
-name: lower_schedule_bank_b32
+name: lower_sched_bank_b32
 tracksRegLiveness: true
 body: |
   bb.0:
@@ -20,10 +20,10 @@ body: |
 ...
 
 ---
-# CHECK-LABEL: name: lower_schedule_bank_b64
+# CHECK-LABEL: name: lower_sched_bank_b64
 # CHECK: %1:vreg_64_align2 = COPY %0
 # CHECK-NOT: V_SCHEDULE_BANK_B64
-name: lower_schedule_bank_b64
+name: lower_sched_bank_b64
 tracksRegLiveness: true
 body: |
   bb.0:

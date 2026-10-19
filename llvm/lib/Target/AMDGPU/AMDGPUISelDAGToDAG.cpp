@@ -3319,7 +3319,7 @@ void AMDGPUDAGToDAGISel::SelectINTRINSIC_WO_CHAIN(SDNode *N) {
   case Intrinsic::amdgcn_interp_p1_f16:
     SelectInterpP1F16(N);
     return;
-  case Intrinsic::amdgcn_schedule_bank: {
+  case Intrinsic::amdgcn_sched_bank: {
     SDValue Src = N->getOperand(1);
     auto *BankC = dyn_cast<ConstantSDNode>(N->getOperand(2));
     // Bank must be a constant; fall back (and error) otherwise.
@@ -3344,9 +3344,9 @@ void AMDGPUDAGToDAGISel::SelectINTRINSIC_WO_CHAIN(SDNode *N) {
     CurDAG->SelectNodeTo(N, PseudoOpc, N->getVTList(), {Src, BankImm});
     return;
   }
-  case Intrinsic::amdgcn_schedule_vgpr:
-  case Intrinsic::amdgcn_schedule_sgpr:
-  case Intrinsic::amdgcn_schedule_agpr: {
+  case Intrinsic::amdgcn_sched_vgpr:
+  case Intrinsic::amdgcn_sched_sgpr:
+  case Intrinsic::amdgcn_sched_agpr: {
     SDValue Src = N->getOperand(1);
     auto *RegNumC = dyn_cast<ConstantSDNode>(N->getOperand(2));
     auto *StrictC = dyn_cast<ConstantSDNode>(N->getOperand(3));
@@ -3356,7 +3356,7 @@ void AMDGPUDAGToDAGISel::SelectINTRINSIC_WO_CHAIN(SDNode *N) {
     }
     unsigned Bits = N->getValueType(0).getSizeInBits();
     unsigned PseudoOpc;
-    if (IntrID == Intrinsic::amdgcn_schedule_vgpr) {
+    if (IntrID == Intrinsic::amdgcn_sched_vgpr) {
       switch (Bits) {
       case 32:  PseudoOpc = AMDGPU::V_SCHEDULE_VGPR_B32;  break;
       case 64:  PseudoOpc = AMDGPU::V_SCHEDULE_VGPR_B64;  break;
@@ -3368,7 +3368,7 @@ void AMDGPUDAGToDAGISel::SelectINTRINSIC_WO_CHAIN(SDNode *N) {
         CurDAG->RemoveDeadNode(N);
         return;
       }
-    } else if (IntrID == Intrinsic::amdgcn_schedule_sgpr) {
+    } else if (IntrID == Intrinsic::amdgcn_sched_sgpr) {
       switch (Bits) {
       case 32:  PseudoOpc = AMDGPU::S_SCHEDULE_SGPR_B32;  break;
       case 64:  PseudoOpc = AMDGPU::S_SCHEDULE_SGPR_B64;  break;

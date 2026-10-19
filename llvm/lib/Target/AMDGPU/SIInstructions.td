@@ -130,8 +130,8 @@ def V_CNDMASK_B64_PSEUDO : VOP3Common <(outs VReg_64:$vdst),
 }
 
 // VGPR bank hint pseudos carrying a target bank number in [0, 3]. These are
-// identity copies produced by lowering llvm.amdgcn.schedule.bank. A pre-RA pass
-// (AMDGPUScheduleBank) reads the bank operand, sets a register allocation hint
+// identity copies produced by lowering llvm.amdgcn.sched.bank. A pre-RA pass
+// (AMDGPUSchedBank) reads the bank operand, sets a register allocation hint
 // on the destination vreg, and replaces the pseudo with a COPY.
 let isAsCheapAsAMove = 1, isReMaterializable = 1, hasSideEffects = 0,
     mayLoad = 0, mayStore = 0, Size = 0 in {
@@ -146,7 +146,7 @@ let isAsCheapAsAMove = 1, isReMaterializable = 1, hasSideEffects = 0,
 }
 
 // Exact VGPR register hint pseudos. Identity copies carrying a target VGPR
-// register number and strict flag. The pre-RA AMDGPUScheduleBank pass reads
+// register number and strict flag. The pre-RA AMDGPUSchedBank pass reads
 // these operands, sets a register allocation hint, and replaces with COPY.
 let isAsCheapAsAMove = 1, isReMaterializable = 1, hasSideEffects = 0,
     mayLoad = 0, mayStore = 0, Size = 0 in {

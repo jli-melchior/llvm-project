@@ -812,7 +812,7 @@ def ROCDL_IglpOpt : ROCDL_ConcreteNonMemIntrOp<"iglp.opt", [], 0, [0], ["variant
   }];
 }
 
-def ROCDL_ScheduleBankOp : ROCDL_IntrOp<"schedule.bank", [], [0],
+def ROCDL_ScheduleBankOp : ROCDL_IntrOp<"sched.bank", [], [0],
     [AllTypesMatch<["res", "value"]>], 1, 0, 0, 0, [], []>,
   Arguments<(ins LLVM_Type:$value, I32Attr:$bank,
              OptionalAttr<UnitAttr>:$soft)> {
@@ -827,7 +827,7 @@ def ROCDL_ScheduleBankOp : ROCDL_IntrOp<"schedule.bank", [], [0],
     int32_t encodedBank = schedOp.getSoftAttr() ? bank : (bank | 4);
     auto *fn = llvm::Intrinsic::getOrInsertDeclaration(
         moduleTranslation.getLLVMModule(),
-        llvm::Intrinsic::amdgcn_schedule_bank,
+        llvm::Intrinsic::amdgcn_sched_bank,
         {value->getType()});
     auto *inst = builder.CreateCall(fn,
         {value, builder.getInt32(encodedBank)});
@@ -842,8 +842,8 @@ def ROCDL_ScheduleBankOp : ROCDL_IntrOp<"schedule.bank", [], [0],
 
     Example:
     ```mlir
-    %0 = rocdl.schedule.bank %val, 2 : f32        // strict bank 2 (default)
-    %1 = rocdl.schedule.bank %val, 1 soft : f32   // soft bank 1
+    %0 = rocdl.sched.bank %val, 2 : f32        // strict bank 2 (default)
+    %1 = rocdl.sched.bank %val, 1 soft : f32   // soft bank 1
     ```
   }];
 }
@@ -872,7 +872,7 @@ class ROCDL_ScheduleGPROp<string mnemonic, string intrName, string gprKind>
   }];
 }
 
-def ROCDL_ScheduleVGPROp : ROCDL_ScheduleGPROp<"schedule.vgpr", "vgpr", "VGPR"> {
+def ROCDL_ScheduleVGPROp : ROCDL_ScheduleGPROp<"sched.vgpr", "vgpr", "VGPR"> {
   let description = [{
     VGPR register scheduling hint. Identity at runtime; guides the register
     allocator to place `value` in the specified VGPR register number.
@@ -882,13 +882,13 @@ def ROCDL_ScheduleVGPROp : ROCDL_ScheduleGPROp<"schedule.vgpr", "vgpr", "VGPR"> 
 
     Example:
     ```mlir
-    %0 = rocdl.schedule.vgpr %val, 42 : f32        // strict: allocate to v42
-    %1 = rocdl.schedule.vgpr %val, 10 soft : f32   // soft: prefer v10
+    %0 = rocdl.sched.vgpr %val, 42 : f32        // strict: allocate to v42
+    %1 = rocdl.sched.vgpr %val, 10 soft : f32   // soft: prefer v10
     ```
   }];
 }
 
-def ROCDL_ScheduleSGPROp : ROCDL_ScheduleGPROp<"schedule.sgpr", "sgpr", "SGPR"> {
+def ROCDL_ScheduleSGPROp : ROCDL_ScheduleGPROp<"sched.sgpr", "sgpr", "SGPR"> {
   let description = [{
     SGPR register scheduling hint. Identity at runtime; guides the register
     allocator to place `value` in the specified SGPR register number.
@@ -898,13 +898,13 @@ def ROCDL_ScheduleSGPROp : ROCDL_ScheduleGPROp<"schedule.sgpr", "sgpr", "SGPR"> 
 
     Example:
     ```mlir
-    %0 = rocdl.schedule.sgpr %val, 10 : i32        // strict: allocate to s10
-    %1 = rocdl.schedule.sgpr %val, 4 soft : i32    // soft: prefer s4
+    %0 = rocdl.sched.sgpr %val, 10 : i32        // strict: allocate to s10
+    %1 = rocdl.sched.sgpr %val, 4 soft : i32    // soft: prefer s4
     ```
   }];
 }
 
-def ROCDL_ScheduleAGPROp : ROCDL_ScheduleGPROp<"schedule.agpr", "agpr", "AGPR"> {
+def ROCDL_ScheduleAGPROp : ROCDL_ScheduleGPROp<"sched.agpr", "agpr", "AGPR"> {
   let description = [{
     AGPR register scheduling hint. Identity at runtime; guides the register
     allocator to place `value` in the specified AGPR register number.
@@ -915,8 +915,8 @@ def ROCDL_ScheduleAGPROp : ROCDL_ScheduleGPROp<"schedule.agpr", "agpr", "AGPR"> 
 
     Example:
     ```mlir
-    %0 = rocdl.schedule.agpr %val, 8 : f32         // strict: allocate to a8
-    %1 = rocdl.schedule.agpr %val, 0 soft : f32    // soft: prefer a0
+    %0 = rocdl.sched.agpr %val, 8 : f32         // strict: allocate to a8
+    %1 = rocdl.sched.agpr %val, 0 soft : f32    // soft: prefer a0
     ```
   }];
 }

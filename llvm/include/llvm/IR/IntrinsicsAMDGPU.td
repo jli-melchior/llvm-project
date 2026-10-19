@@ -4385,31 +4385,31 @@ def int_amdgcn_dead: DefaultAttrsIntrinsic<[llvm_any_ty], [],
 // compile-time constant in [0, 3]:
 //   bank 0 = v0-v255, bank 1 = v256-v511, bank 2 = v512-v767, bank 3 = v768-v1023.
 // This is an identity function at the IR level; the bank argument is consumed by
-// the pre-RA AMDGPUScheduleBank pass which attaches a register allocation hint.
+// the pre-RA AMDGPUSchedBank pass which attaches a register allocation hint.
 // The hint is advisory: the allocator honors it only when the bank has free
 // registers, and never spills to satisfy it.
-def int_amdgcn_schedule_bank : DefaultAttrsIntrinsic<
+def int_amdgcn_sched_bank : DefaultAttrsIntrinsic<
   [llvm_any_ty], [LLVMMatchType<0>, llvm_i32_ty],
   [IntrNoMem, IntrSpeculatable, IntrWillReturn, ImmArg<ArgIndex<1>>]>;
 
 // Hint the register allocator to place the result in a specific VGPR/SGPR/AGPR
 // register number. These are identity functions at the IR level; the register
-// number and strict flag arguments are consumed by the pre-RA AMDGPUScheduleBank
+// number and strict flag arguments are consumed by the pre-RA AMDGPUSchedBank
 // pass which attaches a register allocation hint.
 //   regnum: the target HW register index (e.g., 42 means v42/s42/a42).
 //   strict: 1 = allocator must obey if possible, 0 = advisory hint.
 // For wide values (64/128/256 bit), regnum is the starting register index.
-def int_amdgcn_schedule_vgpr : DefaultAttrsIntrinsic<
+def int_amdgcn_sched_vgpr : DefaultAttrsIntrinsic<
   [llvm_any_ty], [LLVMMatchType<0>, llvm_i32_ty, llvm_i32_ty],
   [IntrNoMem, IntrSpeculatable, IntrWillReturn,
    ImmArg<ArgIndex<1>>, ImmArg<ArgIndex<2>>]>;
 
-def int_amdgcn_schedule_sgpr : DefaultAttrsIntrinsic<
+def int_amdgcn_sched_sgpr : DefaultAttrsIntrinsic<
   [llvm_any_ty], [LLVMMatchType<0>, llvm_i32_ty, llvm_i32_ty],
   [IntrNoMem, IntrSpeculatable, IntrWillReturn,
    ImmArg<ArgIndex<1>>, ImmArg<ArgIndex<2>>]>;
 
-def int_amdgcn_schedule_agpr : DefaultAttrsIntrinsic<
+def int_amdgcn_sched_agpr : DefaultAttrsIntrinsic<
   [llvm_any_ty], [LLVMMatchType<0>, llvm_i32_ty, llvm_i32_ty],
   [IntrNoMem, IntrSpeculatable, IntrWillReturn,
    ImmArg<ArgIndex<1>>, ImmArg<ArgIndex<2>>]>;

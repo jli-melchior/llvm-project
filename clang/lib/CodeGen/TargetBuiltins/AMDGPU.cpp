@@ -2289,7 +2289,7 @@ Value *CodeGenFunction::EmitAMDGPUBuiltinExpr(unsigned BuiltinID,
   case AMDGPU::BI__builtin_amdgcn_permlane_xor:
     return emitBuiltinWithOneOverloadedType<3>(*this, E,
                                                Intrinsic::amdgcn_permlane_xor);
-  case AMDGPU::BI__builtin_amdgcn_schedule_bank: {
+  case AMDGPU::BI__builtin_amdgcn_sched_bank: {
     llvm::Value *Val = EmitScalarExpr(E->getArg(0));
     llvm::Value *Bank = EmitScalarExpr(E->getArg(1));
     llvm::Value *EncodedBank;
@@ -2301,13 +2301,13 @@ Value *CodeGenFunction::EmitAMDGPUBuiltinExpr(unsigned BuiltinID,
       // Default: strict (bank | 4)
       EncodedBank = Builder.CreateOr(Bank, Builder.getInt32(4));
     }
-    llvm::Function *F = CGM.getIntrinsic(Intrinsic::amdgcn_schedule_bank,
+    llvm::Function *F = CGM.getIntrinsic(Intrinsic::amdgcn_sched_bank,
                                          Val->getType());
     return Builder.CreateCall(F, {Val, EncodedBank});
   }
-  case AMDGPU::BI__builtin_amdgcn_schedule_vgpr:
-  case AMDGPU::BI__builtin_amdgcn_schedule_sgpr:
-  case AMDGPU::BI__builtin_amdgcn_schedule_agpr: {
+  case AMDGPU::BI__builtin_amdgcn_sched_vgpr:
+  case AMDGPU::BI__builtin_amdgcn_sched_sgpr:
+  case AMDGPU::BI__builtin_amdgcn_sched_agpr: {
     llvm::Value *Val = EmitScalarExpr(E->getArg(0));
     llvm::Value *RegNum = EmitScalarExpr(E->getArg(1));
     llvm::Value *Strict;
@@ -2320,12 +2320,12 @@ Value *CodeGenFunction::EmitAMDGPUBuiltinExpr(unsigned BuiltinID,
     }
     Intrinsic::ID IID;
     switch (BuiltinID) {
-    case AMDGPU::BI__builtin_amdgcn_schedule_vgpr:
-      IID = Intrinsic::amdgcn_schedule_vgpr; break;
-    case AMDGPU::BI__builtin_amdgcn_schedule_sgpr:
-      IID = Intrinsic::amdgcn_schedule_sgpr; break;
-    case AMDGPU::BI__builtin_amdgcn_schedule_agpr:
-      IID = Intrinsic::amdgcn_schedule_agpr; break;
+    case AMDGPU::BI__builtin_amdgcn_sched_vgpr:
+      IID = Intrinsic::amdgcn_sched_vgpr; break;
+    case AMDGPU::BI__builtin_amdgcn_sched_sgpr:
+      IID = Intrinsic::amdgcn_sched_sgpr; break;
+    case AMDGPU::BI__builtin_amdgcn_sched_agpr:
+      IID = Intrinsic::amdgcn_sched_agpr; break;
     default: llvm_unreachable("unexpected builtin");
     }
     llvm::Function *F = CGM.getIntrinsic(IID, Val->getType());

@@ -53,7 +53,7 @@ static cl::opt<unsigned> StressSGPRLimit(
 
 static cl::opt<bool> StrictVGPRBankHints(
     "amdgpu-strict-vgpr-bank-hints",
-    cl::desc("Restrict schedule.bank values to the requested VGPR bank"),
+    cl::desc("Restrict sched.bank values to the requested VGPR bank"),
     cl::Hidden, cl::init(false));
 
 std::array<std::vector<int16_t>, 32> SIRegisterInfo::RegSplitParts;
@@ -4197,7 +4197,7 @@ bool SIRegisterInfo::getRegAllocationHints(Register VirtReg,
   }
   case AMDGPURI::BankHint:
   case AMDGPURI::StrictBankHint: {
-    // Absolute bank preference from llvm.amdgcn.schedule.bank. The bank number
+    // Absolute bank preference from llvm.amdgcn.sched.bank. The bank number
     // (0-3) is carried in Hint.second. Prefer physregs whose HW index falls in
     // the requested 256-register bank. Advisory only: we return false so the
     // default order still applies when the bank is full.
