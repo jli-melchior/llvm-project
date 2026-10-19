@@ -864,7 +864,7 @@ class ROCDL_ScheduleGPROp<string mnemonic, string intrName, string gprKind>
     int32_t strict = schedOp.getSoftAttr() ? 0 : 1;
     auto *fn = llvm::Intrinsic::getOrInsertDeclaration(
         moduleTranslation.getLLVMModule(),
-        llvm::Intrinsic::amdgcn_schedule_}] # intrName # [{,
+        llvm::Intrinsic::amdgcn_sched_}] # intrName # [{,
         {value->getType()});
     auto *inst = builder.CreateCall(fn,
         {value, builder.getInt32(regnum), builder.getInt32(strict)});
