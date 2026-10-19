@@ -2374,6 +2374,7 @@ def FeatureISAVersion12_50_Common : FeatureSet<
    FeatureSWakeupBarrier,
    Feature45BitNumRecordsBufferResource,
    FeatureXNACK,
+   FeatureXNACKOnOffModes,
    FeatureClusters,
    FeatureD16Writes32BitVgpr,
    FeatureMcastLoadInsts,

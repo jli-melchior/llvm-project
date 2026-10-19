@@ -345,7 +345,7 @@ public:
   }
 
   bool isXNACKEnabled() const {
-    return enableXNACK() || TargetID.isXnackOnOrAny();
+    return TargetID.isXnackOnOrAny();
   }
 
   bool hasRelaxedBufferOOBMode() const { return BufferOOBRelaxed; }
