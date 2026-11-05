@@ -90,6 +90,7 @@ private:
   }
 
   bool isVGPRImm(const SDNode *N) const;
+  bool isStrictAGPRPinnedMFMA(const SDNode *N) const;
   bool isUniformLoad(const SDNode *N) const;
   bool isUniformBr(const SDNode *N) const;
 
