@@ -47,6 +47,10 @@ enum {
   StrictAGPRRegHint = 11,
 };
 
+/// Value of an exact-register hint (VGPRRegHint ... StrictAGPRRegHint) that
+/// asks for any register of the file instead of a fixed index.
+constexpr unsigned AnyRegHintIdx = 0xFFFF;
+
 } // end namespace AMDGPURI
 
 class SIRegisterInfo final : public AMDGPUGenRegisterInfo {

@@ -36,7 +36,11 @@
 #include "GCNSubtarget.h"
 #include "SIInstrInfo.h"
 #include "SIRegisterInfo.h"
+#include "llvm/ADT/BitVector.h"
+#include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
+#include "llvm/ADT/EquivalenceClasses.h"
+#include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
@@ -114,6 +118,122 @@ static void propagateHint(MachineRegisterInfo &MRI, Register Reg,
   }
 }
 
+/// Give each chain of values joined by regnum -1 strict AGPR pins its own AGPR
+/// index, if all chains fit in the free AGPRs. With only the file constraint
+/// the allocator moves accumulators between AGPRs once they are all in use,
+/// and each move is a copy; a fixed index per chain keeps every accumulator in
+/// place. A chain is joined through the pin, the accumulator input of the MFMA
+/// that feeds it, PHIs and COPYs, and only through values with one use that is
+/// not a PHI or COPY, so its members are not live at the same time.
+static void assignAnyAGPRIndices(MachineFunction &MF, const SIInstrInfo &TII,
+                                 const SIRegisterInfo &TRI) {
+  MachineRegisterInfo &MRI = MF.getRegInfo();
+  if (!MRI.reservedRegsFrozen())
+    return;
+
+  auto NumRegs = [&](Register R) {
+    return TRI.getRegSizeInBits(*MRI.getRegClass(R)) / 32;
+  };
+  // Besides its one real use a value may be forwarded by PHIs and COPYs on
+  // other paths, such as the loop back edge and exit, but not twice in one
+  // block (a shared initial value of several chains).
+  auto HasOneRealUse = [&](Register R) {
+    unsigned N = 0;
+    SmallPtrSet<const MachineBasicBlock *, 4> Blocks;
+    for (const MachineInstr &U : MRI.use_nodbg_instructions(R))
+      if ((!U.isPHI() && !U.isCopy() && ++N > 1) ||
+          !Blocks.insert(U.getParent()).second)
+        return false;
+    return true;
+  };
+  EquivalenceClasses<unsigned> Chains;
+  auto Join = [&](Register From, Register To) {
+    if (From.isVirtual() && To.isVirtual() && HasOneRealUse(From) &&
+        NumRegs(From) == NumRegs(To))
+      Chains.unionSets(From.id(), To.id());
+  };
+
+  const TargetRegisterClass &AGPRs = AMDGPU::AGPR_32RegClass;
+  BitVector Used(AGPRs.getNumRegs());
+  for (MCPhysReg R : AGPRs)
+    if (MRI.isReserved(R))
+      Used.set(TRI.getHWRegIndex(R));
+
+  SmallVector<MachineInstr *, 64> Pins;
+  for (MachineBasicBlock &MBB : MF) {
+    for (MachineInstr &MI : MBB) {
+      if (MI.isPHI()) {
+        for (unsigned I = 1, E = MI.getNumOperands(); I < E; I += 2)
+          if (!MI.getOperand(I).getSubReg())
+            Join(MI.getOperand(I).getReg(), MI.getOperand(0).getReg());
+        continue;
+      }
+      if (MI.isCopy()) {
+        if (!MI.getOperand(0).getSubReg() && !MI.getOperand(1).getSubReg())
+          Join(MI.getOperand(1).getReg(), MI.getOperand(0).getReg());
+        continue;
+      }
+      if (getScheduleHintKind(MI.getOpcode()) != SHK_AGPR)
+        continue;
+
+      Register Dst = MI.getOperand(0).getReg();
+      unsigned RegNum = MI.getOperand(2).getImm();
+      if (RegNum != ~0u) {
+        unsigned End = std::min<unsigned>(RegNum + NumRegs(Dst), Used.size());
+        if (RegNum < End)
+          Used.set(RegNum, End);
+        continue;
+      }
+      if (MI.getOperand(3).getImm() == 0 || !Dst.isVirtual())
+        continue;
+
+      Pins.push_back(&MI);
+      Chains.insert(Dst.id());
+      const MachineOperand &SrcMO = MI.getOperand(1);
+      if (SrcMO.getSubReg() || !SrcMO.getReg().isVirtual())
+        continue;
+      Join(SrcMO.getReg(), Dst);
+      MachineInstr *Def = MRI.getUniqueVRegDef(SrcMO.getReg());
+      if (!Def || !SIInstrInfo::isMAI(*Def))
+        continue;
+      const MachineOperand *Src2 =
+          TII.getNamedOperand(*Def, AMDGPU::OpName::src2);
+      if (Src2 && Src2->isReg() && !Src2->getSubReg())
+        Join(Src2->getReg(), SrcMO.getReg());
+    }
+  }
+
+  // First fit, in program order; give up on all chains if one does not fit.
+  DenseMap<unsigned, unsigned> ChainIdx;
+  for (MachineInstr *MI : Pins) {
+    unsigned Leader = Chains.getLeaderValue(MI->getOperand(0).getReg().id());
+    if (ChainIdx.count(Leader))
+      continue;
+    unsigned Size = NumRegs(MI->getOperand(0).getReg());
+    unsigned Align = std::min(Size, 4u);
+    unsigned Base = 0;
+    while (Base + Size <= Used.size() &&
+           Used.find_first_in(Base, Base + Size) != -1)
+      Base += Align;
+    if (Base + Size > Used.size()) {
+      LLVM_DEBUG(dbgs() << "  any-AGPR chains do not fit: " << ChainIdx.size()
+                        << " placed, " << Used.count() << " AGPRs used\n");
+      return;
+    }
+    Used.set(Base, Base + Size);
+    ChainIdx[Leader] = Base;
+  }
+
+  for (MachineInstr *MI : Pins) {
+    unsigned Idx =
+        ChainIdx[Chains.getLeaderValue(MI->getOperand(0).getReg().id())];
+    LLVM_DEBUG(dbgs() << "  any-AGPR pin "
+                      << printReg(MI->getOperand(0).getReg()) << " -> a" << Idx
+                      << '\n');
+    MI->getOperand(2).setImm(Idx);
+  }
+}
+
 // Shared implementation used by both the legacy and new-PM passes.
 static bool runScheduleBank(MachineFunction &MF) {
   const GCNSubtarget &ST = MF.getSubtarget<GCNSubtarget>();
@@ -121,7 +241,11 @@ static bool runScheduleBank(MachineFunction &MF) {
   const SIInstrInfo *TII = ST.getInstrInfo();
   bool Changed = false;
 
+  assignAnyAGPRIndices(MF, *TII, *ST.getRegisterInfo());
+
   SmallVector<MachineInstr *, 16> ToErase;
+  // Values that should share a register with a regnum -1 pin.
+  SmallVector<std::pair<Register, Register>, 16> Partners;
 
   for (MachineBasicBlock &MBB : MF) {
     for (MachineInstr &MI : MBB) {
@@ -167,8 +291,9 @@ static bool runScheduleBank(MachineFunction &MF) {
                           << " strict " << Strict << '\n');
       } else {
         // Exact register pseudos: operand 2 = regnum, operand 3 = strict.
-        // regnum -1 pins only the register file, which the pseudo's operand
-        // class already enforces, so there is no register index to hint.
+        // regnum -1 pins only the register file: the hint carries
+        // AnyRegHintIdx instead of an index. A soft pin with regnum -1 has no
+        // effect.
         unsigned RegNum = MI.getOperand(2).getImm();
         Strict = MI.getOperand(3).getImm() != 0;
         AnyReg = RegNum == ~0u;
@@ -189,7 +314,7 @@ static bool runScheduleBank(MachineFunction &MF) {
         default:
           llvm_unreachable("unexpected schedule hint kind");
         }
-        HintValue = RegNum;
+        HintValue = AnyReg ? AMDGPURI::AnyRegHintIdx : RegNum;
 
         LLVM_DEBUG(dbgs() << "  schedule."
                           << (Kind == SHK_VGPR   ? "vgpr"
@@ -210,27 +335,35 @@ static bool runScheduleBank(MachineFunction &MF) {
       // The strict variant is always HintKind | 1 for each category.
       unsigned StrictVariant = HintKind | 1;
 
-      if (!AnyReg && DstReg.isVirtual() &&
+      bool NoHint = AnyReg && !Strict;
+      if (!NoHint && DstReg.isVirtual() &&
           (IsStrict ||
            MRI.getRegAllocationHint(DstReg).first != StrictVariant))
         MRI.setRegAllocationHint(DstReg, HintKind, HintValue);
-      if (!AnyReg && SrcReg.isVirtual() &&
+      if (!NoHint && SrcReg.isVirtual() &&
           (IsStrict ||
            MRI.getRegAllocationHint(SrcReg).first != StrictVariant))
         MRI.setRegAllocationHint(SrcReg, HintKind, HintValue);
 
       SmallDenseSet<unsigned, 32> Visited;
-      if (!AnyReg && DstReg.isVirtual())
+      if (!NoHint && DstReg.isVirtual())
         propagateHint(MRI, DstReg, HintValue, HintKind, Visited);
 
-      // The kept pseudo is not a COPY, so nothing else asks RA to give both
-      // sides the same register; without that it expands to a real copy.
+      // With an index every value in the chain is hinted to the same
+      // register. Without one, nothing else asks RA to give the kept pseudo's
+      // source and result, or an MFMA's accumulator input and result, the same
+      // register, and each mismatch becomes a copy.
       if (AnyReg && Strict && DstReg.isVirtual() && SrcReg.isVirtual() &&
           !SrcMO.getSubReg()) {
-        if (MRI.getRegAllocationHint(DstReg).first == 0)
-          MRI.addRegAllocationHint(DstReg, SrcReg);
-        if (MRI.getRegAllocationHint(SrcReg).first == 0)
-          MRI.addRegAllocationHint(SrcReg, DstReg);
+        Partners.emplace_back(SrcReg, DstReg);
+        MachineInstr *Def = MRI.getUniqueVRegDef(SrcReg);
+        const MachineOperand *Src2 =
+            Def && SIInstrInfo::isMAI(*Def)
+                ? TII->getNamedOperand(*Def, AMDGPU::OpName::src2)
+                : nullptr;
+        if (Src2 && Src2->isReg() && Src2->getReg().isVirtual() &&
+            !Src2->getSubReg())
+          Partners.emplace_back(Src2->getReg(), SrcReg);
       }
 
       // A strict exact-register pin must keep its own def until after RA:
@@ -249,6 +382,12 @@ static bool runScheduleBank(MachineFunction &MF) {
       ToErase.push_back(&MI);
       Changed = true;
     }
+  }
+
+  // After all hints are set: setRegAllocationHint drops earlier entries.
+  for (auto [A, B] : Partners) {
+    MRI.addRegAllocationHint(A, B);
+    MRI.addRegAllocationHint(B, A);
   }
 
   for (MachineInstr *MI : ToErase)

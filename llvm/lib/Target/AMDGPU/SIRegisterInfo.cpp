@@ -4241,22 +4241,40 @@ bool SIRegisterInfo::getRegAllocationHints(Register VirtReg,
     if (!ClassOK)
       return false;
 
-    unsigned TargetIdx = Hint.second;
-    for (MCPhysReg PhysReg : Order) {
+    auto InFile = [&](MCPhysReg PhysReg) {
       if (MRI.isReserved(PhysReg))
-        continue;
-      if (getHWRegIndex(PhysReg) != TargetIdx)
-        continue;
+        return false;
       const TargetRegisterClass *RC = getPhysRegBaseClass(PhysReg);
-      if (!RC)
-        continue;
-      if (WantAGPR && !isAGPRClass(RC))
-        continue;
-      if (WantVGPR && !isVGPRClass(RC))
-        continue;
-      if (WantSGPR && !isSGPRClass(RC))
-        continue;
-      Hints.push_back(PhysReg);
+      return RC && (!WantAGPR || isAGPRClass(RC)) &&
+             (!WantVGPR || isVGPRClass(RC)) && (!WantSGPR || isSGPRClass(RC));
+    };
+
+    unsigned TargetIdx = Hint.second;
+    if (TargetIdx == AMDGPURI::AnyRegHintIdx) {
+      // Any register of the file. The registers already given to the values
+      // this one is copied from or to (the later hint entries) come first, so
+      // a chain of pinned values keeps one register.
+      SmallSet<MCPhysReg, 8> Preferred;
+      for (Register HintReg :
+           drop_begin(MRI.getRegAllocationHints(VirtReg)->second)) {
+        MCPhysReg Phys = 0;
+        if (HintReg.isPhysical())
+          Phys = HintReg;
+        else if (VRM && VRM->hasPhys(HintReg))
+          Phys = VRM->getPhys(HintReg);
+        if (Phys && is_contained(Order, Phys) && InFile(Phys) &&
+            Preferred.insert(Phys).second)
+          Hints.push_back(Phys);
+      }
+      for (MCPhysReg PhysReg : Order)
+        if (!Preferred.count(PhysReg) && InFile(PhysReg))
+          Hints.push_back(PhysReg);
+      return Strict;
+    }
+
+    for (MCPhysReg PhysReg : Order) {
+      if (getHWRegIndex(PhysReg) == TargetIdx && InFile(PhysReg))
+        Hints.push_back(PhysReg);
     }
     // Strict is a hard constraint. If none matched, allocation fails instead
     // of silently using the other file.
