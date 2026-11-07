@@ -223,6 +223,16 @@ static bool runScheduleBank(MachineFunction &MF) {
       if (!AnyReg && DstReg.isVirtual())
         propagateHint(MRI, DstReg, HintValue, HintKind, Visited);
 
+      // The kept pseudo is not a COPY, so nothing else asks RA to give both
+      // sides the same register; without that it expands to a real copy.
+      if (AnyReg && Strict && DstReg.isVirtual() && SrcReg.isVirtual() &&
+          !SrcMO.getSubReg()) {
+        if (MRI.getRegAllocationHint(DstReg).first == 0)
+          MRI.addRegAllocationHint(DstReg, SrcReg);
+        if (MRI.getRegAllocationHint(SrcReg).first == 0)
+          MRI.addRegAllocationHint(SrcReg, DstReg);
+      }
+
       // A strict exact-register pin must keep its own def until after RA:
       // a plain COPY gets coalesced and the hint can be dropped with it. For
       // AGPR it also keeps the AGPR operand constraint. expandPostRAPseudo

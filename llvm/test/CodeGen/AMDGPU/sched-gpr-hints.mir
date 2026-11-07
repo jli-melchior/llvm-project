@@ -66,8 +66,13 @@ body: |
 
 ---
 # regnum -1 (any register of the file): a strict pin keeps the pseudo, a soft
-# pin is a plain COPY.
+# pin is a plain COPY. The strict pin's source and result prefer each other so
+# the kept pseudo expands to nothing.
 # CHECK-LABEL: name: lower_sched_vgpr_any
+# CHECK: registers:
+# CHECK-NEXT: - { id: 0, class: vgpr_32, preferred-register: '%1'
+# CHECK-NEXT: - { id: 1, class: vgpr_32, preferred-register: '%0'
+# CHECK-NEXT: - { id: 2, class: vgpr_32, preferred-register: ''
 # CHECK: %1:vgpr_32 = V_SCHEDULE_VGPR_B32 %0, -1, 1
 # CHECK: %2:vgpr_32 = COPY %0
 # CHECK-NOT: V_SCHEDULE_VGPR_B32
