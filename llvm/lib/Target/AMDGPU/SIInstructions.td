@@ -147,7 +147,8 @@ let isAsCheapAsAMove = 1, isReMaterializable = 1, hasSideEffects = 0,
 
 // Exact VGPR register hint pseudos. Identity copies carrying a target VGPR
 // register number and strict flag. The pre-RA AMDGPUSchedBank pass reads
-// these operands, sets a register allocation hint, and replaces with COPY.
+// these operands and sets a register allocation hint. Soft pins become a COPY;
+// strict pins stay until expandPostRAPseudo.
 let isAsCheapAsAMove = 1, isReMaterializable = 1, hasSideEffects = 0,
     mayLoad = 0, mayStore = 0, Size = 0 in {
   def V_SCHEDULE_VGPR_B32  : VPseudoInstSI<(outs VGPR_32:$vdst),

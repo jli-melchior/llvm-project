@@ -2554,8 +2554,19 @@ bool SIInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
   case AMDGPU::A_SCHEDULE_AGPR_B64:
   case AMDGPU::A_SCHEDULE_AGPR_B128:
   case AMDGPU::A_SCHEDULE_AGPR_B256:
-  case AMDGPU::A_SCHEDULE_AGPR_B512: {
-    // Strict AGPR pins are kept through RA so the operand class stays AGPR.
+  case AMDGPU::A_SCHEDULE_AGPR_B512:
+  case AMDGPU::V_SCHEDULE_VGPR_B32:
+  case AMDGPU::V_SCHEDULE_VGPR_B64:
+  case AMDGPU::V_SCHEDULE_VGPR_B128:
+  case AMDGPU::V_SCHEDULE_VGPR_B256:
+  case AMDGPU::V_SCHEDULE_VGPR_B512:
+  case AMDGPU::S_SCHEDULE_SGPR_B32:
+  case AMDGPU::S_SCHEDULE_SGPR_B64:
+  case AMDGPU::S_SCHEDULE_SGPR_B128:
+  case AMDGPU::S_SCHEDULE_SGPR_B256:
+  case AMDGPU::S_SCHEDULE_SGPR_B512: {
+    // Strict exact-register pins are kept through RA so the pinned value keeps
+    // its own def and hint (and, for AGPR, its operand class).
     // The immediates have already been consumed as allocation hints.
     Register Dst = MI.getOperand(0).getReg();
     Register Src = MI.getOperand(1).getReg();

@@ -219,9 +219,11 @@ static bool runScheduleBank(MachineFunction &MF) {
       if (DstReg.isVirtual())
         propagateHint(MRI, DstReg, HintValue, HintKind, Visited);
 
-      // A strict AGPR pin must keep its AGPR operand constraint until after
-      // RA. expandPostRAPseudo turns the pseudo into a physreg copy.
-      if (Kind == SHK_AGPR && Strict) {
+      // A strict exact-register pin must keep its own def until after RA:
+      // a plain COPY gets coalesced and the hint can be dropped with it. For
+      // AGPR it also keeps the AGPR operand constraint. expandPostRAPseudo
+      // turns the pseudo into a physreg copy.
+      if (Kind != SHK_Bank && Strict) {
         Changed = true;
         continue;
       }

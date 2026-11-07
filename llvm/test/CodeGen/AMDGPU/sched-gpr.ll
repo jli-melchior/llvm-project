@@ -8,6 +8,7 @@
 declare i32 @llvm.amdgcn.sched.vgpr.i32(i32, i32, i32)
 declare i64 @llvm.amdgcn.sched.vgpr.i64(i64, i32, i32)
 declare <16 x float> @llvm.amdgcn.sched.vgpr.v16f32(<16 x float>, i32, i32)
+declare <4 x float> @llvm.amdgcn.sched.vgpr.v4f32(<4 x float>, i32, i32)
 
 ; --------------------------------------------------------------------------
 ; sched_vgpr: strict hint to v42
@@ -73,11 +74,37 @@ define amdgpu_kernel void @vgpr200_64(ptr addrspace(1) %out, i64 %x) #0 {
 ; sched_vgpr: 512-bit value (v16f32), strict hint to v[512:527]
 
 ; GCN-LABEL: {{^}}vgpr512_v16f32:
-; GCN: v[512:527]
+; GCN-DAG: v[524:527]
+; GCN-DAG: v[512:515]
 define amdgpu_kernel void @vgpr512_v16f32(ptr addrspace(1) %out, ptr addrspace(1) %in) #0 {
   %x = load <16 x float>, ptr addrspace(1) %in
   %h = call <16 x float> @llvm.amdgcn.sched.vgpr.v16f32(<16 x float> %x, i32 512, i32 1)
   store <16 x float> %h, ptr addrspace(1) %out
+  ret void
+}
+
+; --------------------------------------------------------------------------
+; sched_vgpr: a strict pin on a value built from sub-register defs still holds
+; after coalescing, and every later use reads the pinned v[40:43].
+
+; GCN-LABEL: {{^}}vgpr40_shared_uses:
+; GCN-DAG: v_pk_add_f32 v[40:41],
+; GCN-DAG: v_pk_add_f32 v[42:43],
+; GCN-DAG: v_pk_add_f32 v[{{[0-9]+:[0-9]+}}], v[40:41],
+; GCN-DAG: v_pk_mul_f32 v[{{[0-9]+:[0-9]+}}], v[40:41],
+define amdgpu_kernel void @vgpr40_shared_uses(ptr addrspace(1) %out, ptr addrspace(1) %in) #0 {
+  %pb = getelementptr <4 x float>, ptr addrspace(1) %in, i32 1
+  %pe = getelementptr <4 x float>, ptr addrspace(1) %in, i32 2
+  %a = load volatile <4 x float>, ptr addrspace(1) %in
+  %b = load volatile <4 x float>, ptr addrspace(1) %pb
+  %e = load volatile <4 x float>, ptr addrspace(1) %pe
+  %c0 = fadd <4 x float> %a, %b
+  %c = call <4 x float> @llvm.amdgcn.sched.vgpr.v4f32(<4 x float> %c0, i32 40, i32 1)
+  %d = fadd <4 x float> %c, %e
+  %f = fmul <4 x float> %c, %e
+  %o2 = getelementptr <4 x float>, ptr addrspace(1) %out, i32 1
+  store <4 x float> %d, ptr addrspace(1) %out
+  store <4 x float> %f, ptr addrspace(1) %o2
   ret void
 }
 
