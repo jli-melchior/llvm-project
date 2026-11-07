@@ -136,6 +136,7 @@ static bool runScheduleBank(MachineFunction &MF) {
       unsigned HintKind;
       unsigned HintValue;
       bool Strict = false;
+      bool AnyReg = false;
 
       if (Kind == SHK_Bank) {
         // Bank pseudos are only valid on targets with 1024 addressable VGPRs.
@@ -166,8 +167,11 @@ static bool runScheduleBank(MachineFunction &MF) {
                           << " strict " << Strict << '\n');
       } else {
         // Exact register pseudos: operand 2 = regnum, operand 3 = strict.
+        // regnum -1 pins only the register file, which the pseudo's operand
+        // class already enforces, so there is no register index to hint.
         unsigned RegNum = MI.getOperand(2).getImm();
         Strict = MI.getOperand(3).getImm() != 0;
+        AnyReg = RegNum == ~0u;
 
         switch (Kind) {
         case SHK_VGPR:
@@ -206,17 +210,17 @@ static bool runScheduleBank(MachineFunction &MF) {
       // The strict variant is always HintKind | 1 for each category.
       unsigned StrictVariant = HintKind | 1;
 
-      if (DstReg.isVirtual() &&
+      if (!AnyReg && DstReg.isVirtual() &&
           (IsStrict ||
            MRI.getRegAllocationHint(DstReg).first != StrictVariant))
         MRI.setRegAllocationHint(DstReg, HintKind, HintValue);
-      if (SrcReg.isVirtual() &&
+      if (!AnyReg && SrcReg.isVirtual() &&
           (IsStrict ||
            MRI.getRegAllocationHint(SrcReg).first != StrictVariant))
         MRI.setRegAllocationHint(SrcReg, HintKind, HintValue);
 
       SmallDenseSet<unsigned, 32> Visited;
-      if (DstReg.isVirtual())
+      if (!AnyReg && DstReg.isVirtual())
         propagateHint(MRI, DstReg, HintValue, HintKind, Visited);
 
       // A strict exact-register pin must keep its own def until after RA:

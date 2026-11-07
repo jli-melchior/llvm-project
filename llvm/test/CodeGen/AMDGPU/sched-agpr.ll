@@ -64,4 +64,29 @@ define amdgpu_kernel void @agpr0_kept(i32 %x) #0 {
   ret void
 }
 
+; --------------------------------------------------------------------------
+; regnum -1 keeps the value in the AGPR file without fixing the index. A soft
+; pin with regnum -1 has no effect.
+
+; GCN-LABEL: {{^}}agpr_any_as_vgpr:
+; GCN: v_accvgpr_write_b32 [[A:a[0-9]+]],
+; GCN: v_accvgpr_read_b32 v{{[0-9]+}}, [[A]]
+; GCN: v_add_u32_e32
+define amdgpu_kernel void @agpr_any_as_vgpr(ptr addrspace(1) %out, i32 %x) #0 {
+  %h = call i32 @llvm.amdgcn.sched.agpr.i32(i32 %x, i32 -1, i32 1)
+  %y = add i32 %h, 1
+  store i32 %y, ptr addrspace(1) %out
+  ret void
+}
+
+; GCN-LABEL: {{^}}agpr_any_soft:
+; GCN-NOT: v_accvgpr_write
+; GCN: .Lagpr_any_soft.num_agpr, 0
+define amdgpu_kernel void @agpr_any_soft(ptr addrspace(1) %out, i32 %x) #0 {
+  %h = call i32 @llvm.amdgcn.sched.agpr.i32(i32 %x, i32 -1, i32 0)
+  %y = add i32 %h, 1
+  store i32 %y, ptr addrspace(1) %out
+  ret void
+}
+
 attributes #0 = { "amdgpu-flat-work-group-size"="64,64" "amdgpu-waves-per-eu"="1,1" }

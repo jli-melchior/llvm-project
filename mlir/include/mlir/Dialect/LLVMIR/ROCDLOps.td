@@ -847,16 +847,17 @@ def ROCDL_ScheduleBankOp : ROCDL_IntrOp<"sched.bank", [], [0],
 class ROCDL_ScheduleGPROp<string mnemonic, string intrName, string gprKind>
   : ROCDL_IntrOp<mnemonic, [], [0],
     [AllTypesMatch<["res", "value"]>], 1, 0, 0, 0, [], []>,
-  Arguments<(ins LLVM_Type:$value, I32Attr:$regnum,
+  Arguments<(ins LLVM_Type:$value, OptionalAttr<I32Attr>:$regnum,
              OptionalAttr<UnitAttr>:$soft)> {
   let results = (outs LLVM_Type:$res);
   let assemblyFormat = [{
-    $value `,` $regnum (`soft` $soft^)? attr-dict `:` type($value)
+    $value (`,` $regnum^)? (`soft` $soft^)? attr-dict `:` type($value)
   }];
   string llvmBuilder = [{
     auto schedOp = cast<ROCDL::Schedule}] # gprKind # [{Op>(opInst);
     auto *value = moduleTranslation.lookupValue(schedOp.getValue());
-    int32_t regnum = schedOp.getRegnum();
+    // An omitted regnum is encoded as -1: any register of the file.
+    int32_t regnum = static_cast<int32_t>(schedOp.getRegnum().value_or(-1));
     int32_t strict = schedOp.getSoftAttr() ? 0 : 1;
     auto *fn = llvm::Intrinsic::getOrInsertDeclaration(
         moduleTranslation.getLLVMModule(),
@@ -874,12 +875,14 @@ def ROCDL_ScheduleVGPROp : ROCDL_ScheduleGPROp<"sched.vgpr", "vgpr", "VGPR"> {
     allocator to place `value` in the specified VGPR register number.
 
     For wide values (64/128/256 bit), `regnum` is the starting register index.
+    Omit `regnum` to only keep `value` in VGPRs, in any register.
     Default is strict (allocator must obey). Pass `soft` for an advisory hint.
 
     Example:
     ```mlir
     %0 = rocdl.sched.vgpr %val, 42 : f32        // strict: allocate to v42
     %1 = rocdl.sched.vgpr %val, 10 soft : f32   // soft: prefer v10
+    %2 = rocdl.sched.vgpr %val : f32            // strict: any VGPR
     ```
   }];
 }
@@ -890,12 +893,14 @@ def ROCDL_ScheduleSGPROp : ROCDL_ScheduleGPROp<"sched.sgpr", "sgpr", "SGPR"> {
     allocator to place `value` in the specified SGPR register number.
 
     For wide values (64/128/256 bit), `regnum` is the starting register index.
+    Omit `regnum` to only keep `value` in SGPRs, in any register.
     Default is strict (allocator must obey). Pass `soft` for an advisory hint.
 
     Example:
     ```mlir
     %0 = rocdl.sched.sgpr %val, 10 : i32        // strict: allocate to s10
     %1 = rocdl.sched.sgpr %val, 4 soft : i32    // soft: prefer s4
+    %2 = rocdl.sched.sgpr %val : i32            // strict: any SGPR
     ```
   }];
 }
@@ -907,12 +912,14 @@ def ROCDL_ScheduleAGPROp : ROCDL_ScheduleGPROp<"sched.agpr", "agpr", "AGPR"> {
     Only valid on targets with MAI instructions (e.g., gfx90a, gfx940).
 
     For wide values (64/128/256 bit), `regnum` is the starting register index.
+    Omit `regnum` to only keep `value` in AGPRs, in any register.
     Default is strict (allocator must obey). Pass `soft` for an advisory hint.
 
     Example:
     ```mlir
     %0 = rocdl.sched.agpr %val, 8 : f32         // strict: allocate to a8
     %1 = rocdl.sched.agpr %val, 0 soft : f32    // soft: prefer a0
+    %2 = rocdl.sched.agpr %val : f32            // strict: any AGPR
     ```
   }];
 }

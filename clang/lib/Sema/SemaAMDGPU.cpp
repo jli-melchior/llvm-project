@@ -489,7 +489,8 @@ bool SemaAMDGPU::CheckAMDGCNBuiltinFunctionCall(unsigned BuiltinID,
     case AMDGPU::BI__builtin_amdgcn_sched_agpr: MaxReg = 255;  break;
     default: llvm_unreachable("unexpected builtin");
     }
-    return SemaRef.BuiltinConstantArgRange(TheCall, 1, 0, MaxReg);
+    // -1 asks for any register of the file.
+    return SemaRef.BuiltinConstantArgRange(TheCall, 1, -1, MaxReg);
   }
   default:
     return false;

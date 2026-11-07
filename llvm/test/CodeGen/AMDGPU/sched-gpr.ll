@@ -9,6 +9,8 @@ declare i32 @llvm.amdgcn.sched.vgpr.i32(i32, i32, i32)
 declare i64 @llvm.amdgcn.sched.vgpr.i64(i64, i32, i32)
 declare <16 x float> @llvm.amdgcn.sched.vgpr.v16f32(<16 x float>, i32, i32)
 declare <4 x float> @llvm.amdgcn.sched.vgpr.v4f32(<4 x float>, i32, i32)
+declare i32 @llvm.amdgcn.sched.sgpr.i32(i32, i32, i32)
+declare i32 @llvm.amdgcn.workitem.id.x()
 
 ; --------------------------------------------------------------------------
 ; sched_vgpr: strict hint to v42
@@ -105,6 +107,31 @@ define amdgpu_kernel void @vgpr40_shared_uses(ptr addrspace(1) %out, ptr addrspa
   %o2 = getelementptr <4 x float>, ptr addrspace(1) %out, i32 1
   store <4 x float> %d, ptr addrspace(1) %out
   store <4 x float> %f, ptr addrspace(1) %o2
+  ret void
+}
+
+; --------------------------------------------------------------------------
+; regnum -1: any register of the file. No index is forced, so the allocator
+; keeps the default low-numbered registers.
+
+; GCN-LABEL: {{^}}vgpr_any:
+; GCN-NOT: v42
+; GCN: v_add_nc_u32_e32 v{{[0-9]}}, 1, v{{[0-9]}}
+define amdgpu_kernel void @vgpr_any(ptr addrspace(1) %out, i32 %x) #0 {
+  %v = call i32 @llvm.amdgcn.workitem.id.x()
+  %s = add i32 %v, %x
+  %h = call i32 @llvm.amdgcn.sched.vgpr.i32(i32 %s, i32 -1, i32 1)
+  %y = add i32 %h, 1
+  store i32 %y, ptr addrspace(1) %out
+  ret void
+}
+
+; GCN-LABEL: {{^}}sgpr_any:
+; GCN: s_add_co_i32 s{{[0-9]+}}, s{{[0-9]+}}, 1
+define amdgpu_kernel void @sgpr_any(ptr addrspace(1) %out, i32 inreg %x) #0 {
+  %h = call i32 @llvm.amdgcn.sched.sgpr.i32(i32 %x, i32 -1, i32 1)
+  %y = add i32 %h, 1
+  store i32 %y, ptr addrspace(1) %out
   ret void
 }
 

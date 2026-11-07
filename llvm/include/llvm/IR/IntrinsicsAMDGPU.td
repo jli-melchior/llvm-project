@@ -4379,7 +4379,9 @@ def int_amdgcn_sched_bank : DefaultAttrsIntrinsic<
 // register number. These are identity functions at the IR level; the register
 // number and strict flag arguments are consumed by the pre-RA AMDGPUSchedBank
 // pass which attaches a register allocation hint.
-//   regnum: the target HW register index (e.g., 42 means v42/s42/a42).
+//   regnum: the target HW register index (e.g., 42 means v42/s42/a42), or -1
+//           for any register of that file. With -1 a strict pin only keeps
+//           the value in the file and a soft pin has no effect.
 //   strict: 1 = allocator must obey if possible, 0 = advisory hint.
 // For wide values (64/128/256 bit), regnum is the starting register index.
 def int_amdgcn_sched_vgpr : DefaultAttrsIntrinsic<

@@ -29,6 +29,21 @@ define amdgpu_kernel void @strict_pin(ptr addrspace(1) %out, <4 x half> %a, <4 x
   ret void
 }
 
+; A strict pin with regnum -1 also selects the AGPR form; the allocator picks
+; the AGPRs.
+; ISEL-LABEL: name: any_pin
+; ISEL: V_MFMA_F32_16X16X16F16_e64
+; ISEL-NOT: V_MFMA_F32_16X16X16F16_vgprcd_e64
+; GCN-LABEL: {{^}}any_pin:
+; GCN: v_mfma_f32_16x16x16_f16 a[{{[0-9:]+}}], v[{{[0-9:]+}}], v[{{[0-9:]+}}], a[{{[0-9:]+}}]
+define amdgpu_kernel void @any_pin(ptr addrspace(1) %out, <4 x half> %a, <4 x half> %b, <4 x float> %c) #0 {
+  %cin = call <4 x float> @llvm.amdgcn.sched.agpr.v4f32(<4 x float> %c, i32 -1, i32 1)
+  %r = call <4 x float> @llvm.amdgcn.mfma.f32.16x16x16f16(<4 x half> %a, <4 x half> %b, <4 x float> %cin, i32 0, i32 0, i32 0)
+  %rp = call <4 x float> @llvm.amdgcn.sched.agpr.v4f32(<4 x float> %r, i32 -1, i32 1)
+  store <4 x float> %rp, ptr addrspace(1) %out
+  ret void
+}
+
 ; ISEL-LABEL: name: soft_pin
 ; ISEL: V_MFMA_F32_16X16X16F16_vgprcd_e64
 define amdgpu_kernel void @soft_pin(ptr addrspace(1) %out, <4 x half> %a, <4 x half> %b, <4 x float> %c) #0 {

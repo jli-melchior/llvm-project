@@ -47,6 +47,13 @@ void test_sched_vgpr_default_strict(global int *out, int x) {
   *out = __builtin_amdgcn_sched_vgpr(x, 42);
 }
 
+// CHECK-LABEL: @test_sched_vgpr_any
+// CHECK: call i32 @llvm.amdgcn.sched.vgpr.i32(i32 %{{.*}}, i32 -1, i32 1)
+void test_sched_vgpr_any(global int *out, int x) {
+  // regnum -1: any VGPR
+  *out = __builtin_amdgcn_sched_vgpr(x, -1);
+}
+
 // === sched_sgpr tests ===
 
 // CHECK-LABEL: @test_sched_sgpr_i32

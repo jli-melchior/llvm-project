@@ -470,6 +470,9 @@ llvm.func @rocdl.sched.vgpr(%val : f32, %ival : i32) -> f32 {
   // soft: regnum 10, strict 0
   // CHECK: call i32 @llvm.amdgcn.sched.vgpr.i32(i32 %{{.*}}, i32 10, i32 0)
   %1 = rocdl.sched.vgpr %ival, 10 soft : i32
+  // omitted regnum: -1, any register of the file
+  // CHECK: call float @llvm.amdgcn.sched.vgpr.f32(float %{{.*}}, i32 -1, i32 1)
+  %2 = rocdl.sched.vgpr %val : f32
   llvm.return %0 : f32
 }
 
@@ -479,6 +482,9 @@ llvm.func @rocdl.sched.sgpr(%val : f32, %ival : i32) -> f32 {
   %0 = rocdl.sched.sgpr %val, 20 : f32
   // CHECK: call i32 @llvm.amdgcn.sched.sgpr.i32(i32 %{{.*}}, i32 5, i32 0)
   %1 = rocdl.sched.sgpr %ival, 5 soft : i32
+  // omitted regnum: -1, any register of the file
+  // CHECK: call float @llvm.amdgcn.sched.sgpr.f32(float %{{.*}}, i32 -1, i32 1)
+  %2 = rocdl.sched.sgpr %val : f32
   llvm.return %0 : f32
 }
 
@@ -488,6 +494,9 @@ llvm.func @rocdl.sched.agpr(%val : f32, %ival : i32) -> f32 {
   %0 = rocdl.sched.agpr %val, 8 : f32
   // CHECK: call i32 @llvm.amdgcn.sched.agpr.i32(i32 %{{.*}}, i32 0, i32 0)
   %1 = rocdl.sched.agpr %ival, 0 soft : i32
+  // omitted regnum: -1, any register of the file
+  // CHECK: call float @llvm.amdgcn.sched.agpr.f32(float %{{.*}}, i32 -1, i32 1)
+  %2 = rocdl.sched.agpr %val : f32
   llvm.return %0 : f32
 }
 

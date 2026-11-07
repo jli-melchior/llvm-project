@@ -181,6 +181,8 @@ func.func @rocdl_sched_vgpr(%val : f32, %ival : i32) -> f32 {
   %0 = rocdl.sched.vgpr %val, 42 : f32
   // CHECK: rocdl.sched.vgpr %{{.*}}, 10 soft : i32
   %1 = rocdl.sched.vgpr %ival, 10 soft : i32
+  // CHECK: rocdl.sched.vgpr %{{.*}} : f32
+  %2 = rocdl.sched.vgpr %val : f32
   llvm.return %0 : f32
 }
 
@@ -189,6 +191,8 @@ func.func @rocdl_sched_sgpr(%val : f32, %ival : i32) -> f32 {
   %0 = rocdl.sched.sgpr %val, 20 : f32
   // CHECK: rocdl.sched.sgpr %{{.*}}, 5 soft : i32
   %1 = rocdl.sched.sgpr %ival, 5 soft : i32
+  // CHECK: rocdl.sched.sgpr %{{.*}} : f32
+  %2 = rocdl.sched.sgpr %val : f32
   llvm.return %0 : f32
 }
 
@@ -197,6 +201,8 @@ func.func @rocdl_sched_agpr(%val : f32, %ival : i32) -> f32 {
   %0 = rocdl.sched.agpr %val, 8 : f32
   // CHECK: rocdl.sched.agpr %{{.*}}, 0 soft : i32
   %1 = rocdl.sched.agpr %ival, 0 soft : i32
+  // CHECK: rocdl.sched.agpr %{{.*}} : f32
+  %2 = rocdl.sched.agpr %val : f32
   llvm.return %0 : f32
 }
 
