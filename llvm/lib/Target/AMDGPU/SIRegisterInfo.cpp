@@ -4103,6 +4103,33 @@ const int *SIRegisterInfo::getRegUnitPressureSets(MCRegUnit RegUnit) const {
   return AMDGPUGenRegisterInfo::getRegUnitPressureSets(RegUnit);
 }
 
+static bool isSchedRegHint(unsigned Kind) {
+  return Kind >= AMDGPURI::VGPRRegHint && Kind <= AMDGPURI::StrictAGPRRegHint;
+}
+
+// Keep a sched pin hint when the coalescer merges Reg into NewReg, e.g. into
+// the register PHI elimination created for a loop-carried value.
+void SIRegisterInfo::updateRegAllocHint(Register Reg, Register NewReg,
+                                        MachineFunction &MF) const {
+  MachineRegisterInfo &MRI = MF.getRegInfo();
+  if (!Reg.isVirtual() || !NewReg.isVirtual())
+    return;
+  std::pair<unsigned, Register> Hint = MRI.getRegAllocationHint(Reg);
+  if (!isSchedRegHint(Hint.first))
+    return;
+  std::pair<unsigned, Register> Existing = MRI.getRegAllocationHint(NewReg);
+  bool Upgrade = isSchedRegHint(Existing.first) &&
+                 Existing.first == (Hint.first & ~1u) &&
+                 Existing.second == Hint.second;
+  if ((Existing.first || Existing.second) && !Upgrade)
+    return;
+  SmallVector<Register, 4> Partners(
+      drop_begin(MRI.getRegAllocationHints(Reg)->second));
+  MRI.setRegAllocationHint(NewReg, Hint.first, Hint.second);
+  for (Register Partner : Partners)
+    MRI.addRegAllocationHint(NewReg, Partner);
+}
+
 bool SIRegisterInfo::getRegAllocationHints(Register VirtReg,
                                            ArrayRef<MCPhysReg> Order,
                                            SmallVectorImpl<MCPhysReg> &Hints,

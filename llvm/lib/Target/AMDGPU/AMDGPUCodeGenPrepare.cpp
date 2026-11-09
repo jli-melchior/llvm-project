@@ -16,6 +16,7 @@
 #include "AMDGPUMemoryUtils.h"
 #include "AMDGPUTargetMachine.h"
 #include "SIModeRegisterDefaults.h"
+#include "llvm/ADT/EquivalenceClasses.h"
 #include "llvm/ADT/SetVector.h"
 #include "llvm/Analysis/AssumptionCache.h"
 #include "llvm/Analysis/ConstantFolding.h"
@@ -26,6 +27,7 @@
 #include "llvm/CodeGen/TargetPassConfig.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/IRBuilder.h"
+#include "llvm/IR/InstIterator.h"
 #include "llvm/IR/InstVisitor.h"
 #include "llvm/IR/IntrinsicsAMDGPU.h"
 #include "llvm/IR/PatternMatch.h"
@@ -293,9 +295,103 @@ public:
 
 } // end anonymous namespace
 
+static bool isStrictSchedPin(const Value *V) {
+  const auto *II = dyn_cast<IntrinsicInst>(V);
+  if (!II || (II->getIntrinsicID() != Intrinsic::amdgcn_sched_vgpr &&
+              II->getIntrinsicID() != Intrinsic::amdgcn_sched_sgpr &&
+              II->getIntrinsicID() != Intrinsic::amdgcn_sched_agpr))
+    return false;
+  const auto *Strict = dyn_cast<ConstantInt>(II->getArgOperand(2));
+  return Strict && !Strict->isZero() && isa<ConstantInt>(II->getArgOperand(1));
+}
+
+/// A strict sched pin applies to the whole variable it starts: every value
+/// that replaces it through a PHI or as the accumulator of an MFMA gets the
+/// same pin, so a loop-carried variable or an MFMA accumulator keeps one
+/// register without a pin at each update.
+static bool propagateLoopPins(Function &F, const UniformityInfo &UA) {
+  auto IsMFMA = [](const Value *V) {
+    const auto *II = dyn_cast<IntrinsicInst>(V);
+    return II && II->getCalledFunction()->getName().starts_with(
+                     "llvm.amdgcn.mfma.");
+  };
+  // A value shared by several accumulators (e.g. one initial value) must not
+  // join them into one variable.
+  auto HasOnePHIUser = [](const Value *V) {
+    return count_if(V->users(), [](const User *U) { return isa<PHINode>(U); }) ==
+           1;
+  };
+  auto HasOneAccUser = [&](const Value *V) {
+    return count_if(V->uses(), [&](const Use &U) {
+             return IsMFMA(U.getUser()) && U.getOperandNo() == 2;
+           }) == 1;
+  };
+
+  EquivalenceClasses<Value *> Chains;
+  SmallVector<IntrinsicInst *, 16> Pins;
+  for (Instruction &I : instructions(F)) {
+    if (auto *Phi = dyn_cast<PHINode>(&I)) {
+      for (Value *In : Phi->incoming_values())
+        if (isa<Instruction>(In) && HasOnePHIUser(In))
+          Chains.unionSets(In, Phi);
+    } else if (isStrictSchedPin(&I)) {
+      Pins.push_back(cast<IntrinsicInst>(&I));
+      if (isa<Instruction>(I.getOperand(0)))
+        Chains.unionSets(I.getOperand(0), &I);
+      else
+        Chains.insert(&I);
+    } else if (IsMFMA(&I) && isa<Instruction>(I.getOperand(2)) &&
+               HasOneAccUser(I.getOperand(2))) {
+      Chains.unionSets(I.getOperand(2), &I);
+    }
+  }
+
+  struct ChainPin {
+    IntrinsicInst *Pin;
+    int64_t RegNum;
+    bool Conflict = false;
+  };
+  DenseMap<Value *, ChainPin> Info;
+  for (IntrinsicInst *P : Pins) {
+    int64_t RegNum = cast<ConstantInt>(P->getArgOperand(1))->getSExtValue();
+    auto [It, Inserted] =
+        Info.try_emplace(Chains.getLeaderValue(P), ChainPin{P, RegNum});
+    ChainPin &C = It->second;
+    if (Inserted)
+      continue;
+    if (C.Pin->getIntrinsicID() != P->getIntrinsicID())
+      C.Conflict = true;
+    else if (C.RegNum == -1)
+      C.RegNum = RegNum;
+    else if (RegNum != -1 && RegNum != C.RegNum)
+      C.Conflict = true;
+  }
+
+  bool Changed = false;
+  for (auto [Leader, C] : Info) {
+    if (C.Conflict)
+      continue;
+    for (Value *V : Chains.members(Leader)) {
+      auto *I = dyn_cast<Instruction>(V);
+      if (!I || isa<PHINode>(I) || isStrictSchedPin(I) ||
+          any_of(I->users(), isStrictSchedPin) ||
+          (C.Pin->getIntrinsicID() == Intrinsic::amdgcn_sched_sgpr &&
+           UA.isDivergentAtDef(I)))
+        continue;
+      IRBuilder<> B(I->getNextNode());
+      Value *Pin = B.CreateIntrinsic(
+          C.Pin->getIntrinsicID(), {I->getType()},
+          {I, B.getInt32(C.RegNum), C.Pin->getArgOperand(2)});
+      I->replaceUsesWithIf(Pin, [&](Use &U) { return U.getUser() != Pin; });
+      Changed = true;
+    }
+  }
+  return Changed;
+}
+
 bool AMDGPUCodeGenPrepareImpl::run() {
   BreakPhiNodesCache.clear();
-  bool MadeChange = false;
+  bool MadeChange = propagateLoopPins(F, UA);
 
   // Need to use make_early_inc_range because integer division expansion is
   // handled by Transform/Utils, and it can delete instructions such as the
