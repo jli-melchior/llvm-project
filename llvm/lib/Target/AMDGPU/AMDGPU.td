@@ -2572,6 +2572,7 @@ def FeatureISAVersion12_50_Common : FeatureSet<
    FeatureRealTrue16Insts,
    FeatureVMovB64Inst,
    FeatureVMulU64Inst,
+   FeatureXNACKOnOffModes,
 ]>;
 
 def FeatureISAVersion12_50_STRICT : FeatureSet<
