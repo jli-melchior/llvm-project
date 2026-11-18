@@ -55,6 +55,11 @@ static cl::opt<unsigned> StressSGPRLimit(
     "amdgpu-stress-sgpr", cl::Hidden, cl::init(0),
     cl::desc("Limit SGPRs to N registers by reserving the rest"));
 
+static cl::opt<bool> StrictVGPRBankHints(
+    "amdgpu-strict-vgpr-bank-hints",
+    cl::desc("Restrict sched.bank values to the requested VGPR bank"),
+    cl::Hidden, cl::init(false));
+
 std::array<std::vector<int16_t>, 32> SIRegisterInfo::RegSplitParts;
 std::array<std::array<uint16_t, 32>, 9> SIRegisterInfo::SubRegFromChannelTable;
 
@@ -4268,6 +4273,33 @@ const int *SIRegisterInfo::getRegUnitPressureSets(MCRegUnit RegUnit) const {
   return AMDGPUGenRegisterInfo::getRegUnitPressureSets(RegUnit);
 }
 
+static bool isSchedRegHint(unsigned Kind) {
+  return Kind >= AMDGPURI::VGPRRegHint && Kind <= AMDGPURI::StrictAGPRRegHint;
+}
+
+// Keep a sched pin hint when the coalescer merges Reg into NewReg, e.g. into
+// the register PHI elimination created for a loop-carried value.
+void SIRegisterInfo::updateRegAllocHint(Register Reg, Register NewReg,
+                                        MachineFunction &MF) const {
+  MachineRegisterInfo &MRI = MF.getRegInfo();
+  if (!Reg.isVirtual() || !NewReg.isVirtual())
+    return;
+  std::pair<unsigned, Register> Hint = MRI.getRegAllocationHint(Reg);
+  if (!isSchedRegHint(Hint.first))
+    return;
+  std::pair<unsigned, Register> Existing = MRI.getRegAllocationHint(NewReg);
+  bool Upgrade = isSchedRegHint(Existing.first) &&
+                 Existing.first == (Hint.first & ~1u) &&
+                 Existing.second == Hint.second;
+  if ((Existing.first || Existing.second) && !Upgrade)
+    return;
+  SmallVector<Register, 4> Partners(
+      drop_begin(MRI.getRegAllocationHints(Reg)->second));
+  MRI.setRegAllocationHint(NewReg, Hint.first, Hint.second);
+  for (Register Partner : Partners)
+    MRI.addRegAllocationHint(NewReg, Partner);
+}
+
 bool SIRegisterInfo::getRegAllocationHints(Register VirtReg,
                                            ArrayRef<MCPhysReg> Order,
                                            SmallSetVector<MCPhysReg, 16> &Hints,
@@ -4328,6 +4360,122 @@ bool SIRegisterInfo::getRegAllocationHints(Register VirtReg,
       }
     }
     return false;
+  }
+  case AMDGPURI::SameBank: {
+    const auto *HintInfo = MRI.getRegAllocationHints(VirtReg);
+    if (!HintInfo || !VRM)
+      return TargetRegisterInfo::getRegAllocationHints(VirtReg, Order, Hints,
+                                                       MF, VRM);
+
+    int TargetBank = -1;
+    for (Register HintReg : HintInfo->second) {
+      MCPhysReg PhysHint = 0;
+      if (HintReg.isPhysical())
+        PhysHint = HintReg;
+      else if (VRM->hasPhys(HintReg))
+        PhysHint = VRM->getPhys(HintReg);
+      if (PhysHint) {
+        TargetBank = static_cast<int>(getHWRegIndex(PhysHint) >> 8);
+        break;
+      }
+    }
+
+    if (TargetBank < 0)
+      return TargetRegisterInfo::getRegAllocationHints(VirtReg, Order, Hints,
+                                                       MF, VRM);
+
+    for (MCPhysReg PhysReg : Order) {
+      if (MRI.isReserved(PhysReg))
+        continue;
+      unsigned RegBank = getHWRegIndex(PhysReg) >> 8;
+      if (static_cast<int>(RegBank) == TargetBank)
+        Hints.push_back(PhysReg);
+    }
+    return false;
+  }
+  case AMDGPURI::BankHint:
+  case AMDGPURI::StrictBankHint: {
+    unsigned Bank = Hint.second;
+    if (Bank > 3)
+      return false;
+    unsigned BankStart = Bank * 256;
+    unsigned BankEnd = BankStart + 256;
+    for (MCPhysReg PhysReg : Order) {
+      if (MRI.isReserved(PhysReg))
+        continue;
+      unsigned HWIdx = getHWRegIndex(PhysReg);
+      if (HWIdx >= BankStart && HWIdx < BankEnd)
+        Hints.push_back(PhysReg);
+    }
+    return StrictVGPRBankHints || Hint.first == AMDGPURI::StrictBankHint;
+  }
+  case AMDGPURI::VGPRRegHint:
+  case AMDGPURI::StrictVGPRRegHint:
+  case AMDGPURI::SGPRRegHint:
+  case AMDGPURI::StrictSGPRRegHint:
+  case AMDGPURI::AGPRRegHint:
+  case AMDGPURI::StrictAGPRRegHint: {
+    // Exact architectural register from llvm.amdgcn.sched.{vgpr,sgpr,agpr}.
+    // Hint.second is the HW index. vN and aN share that index, so the hint
+    // only admits physregs of the requested file. A hint that propagated onto
+    // a vreg whose class cannot hold that file (an AGPR pin copied into a
+    // VGPR, for example) is ignored.
+    const unsigned Kind = Hint.first;
+    const bool WantVGPR =
+        Kind == AMDGPURI::VGPRRegHint || Kind == AMDGPURI::StrictVGPRRegHint;
+    const bool WantSGPR =
+        Kind == AMDGPURI::SGPRRegHint || Kind == AMDGPURI::StrictSGPRRegHint;
+    const bool WantAGPR =
+        Kind == AMDGPURI::AGPRRegHint || Kind == AMDGPURI::StrictAGPRRegHint;
+    const bool Strict = Kind == AMDGPURI::StrictVGPRRegHint ||
+                        Kind == AMDGPURI::StrictSGPRRegHint ||
+                        Kind == AMDGPURI::StrictAGPRRegHint;
+    const TargetRegisterClass *VRC = MRI.getRegClass(VirtReg);
+    const bool ClassOK =
+        (WantAGPR && (isAGPRClass(VRC) || isVectorSuperClass(VRC))) ||
+        (WantVGPR && (isVGPRClass(VRC) || isVectorSuperClass(VRC))) ||
+        (WantSGPR && (isSGPRClass(VRC) || isVSSuperClass(VRC)));
+    if (!ClassOK)
+      return false;
+
+    auto InFile = [&](MCPhysReg PhysReg) {
+      if (MRI.isReserved(PhysReg))
+        return false;
+      const TargetRegisterClass *RC = getPhysRegBaseClass(PhysReg);
+      return RC && (!WantAGPR || isAGPRClass(RC)) &&
+             (!WantVGPR || isVGPRClass(RC)) && (!WantSGPR || isSGPRClass(RC));
+    };
+
+    unsigned TargetIdx = Hint.second;
+    if (TargetIdx == AMDGPURI::AnyRegHintIdx) {
+      // Any register of the file. The registers already given to the values
+      // this one is copied from or to (the later hint entries) come first, so
+      // a chain of pinned values keeps one register.
+      SmallSet<MCPhysReg, 8> Preferred;
+      for (Register HintReg :
+           drop_begin(MRI.getRegAllocationHints(VirtReg)->second)) {
+        MCPhysReg Phys = 0;
+        if (HintReg.isPhysical())
+          Phys = HintReg;
+        else if (VRM && VRM->hasPhys(HintReg))
+          Phys = VRM->getPhys(HintReg);
+        if (Phys && is_contained(Order, Phys) && InFile(Phys) &&
+            Preferred.insert(Phys).second)
+          Hints.push_back(Phys);
+      }
+      for (MCPhysReg PhysReg : Order)
+        if (!Preferred.count(PhysReg) && InFile(PhysReg))
+          Hints.push_back(PhysReg);
+      return Strict;
+    }
+
+    for (MCPhysReg PhysReg : Order) {
+      if (getHWRegIndex(PhysReg) == TargetIdx && InFile(PhysReg))
+        Hints.push_back(PhysReg);
+    }
+    // Strict is a hard constraint. If none matched, allocation fails instead
+    // of silently using the other file.
+    return Strict;
   }
   default:
     return TargetRegisterInfo::getRegAllocationHints(VirtReg, Order, Hints, MF,
