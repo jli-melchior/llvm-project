@@ -4389,7 +4389,7 @@ bool SIRegisterInfo::getRegAllocationHints(Register VirtReg,
         continue;
       unsigned RegBank = getHWRegIndex(PhysReg) >> 8;
       if (static_cast<int>(RegBank) == TargetBank)
-        Hints.push_back(PhysReg);
+        Hints.insert(PhysReg);
     }
     return false;
   }
@@ -4405,7 +4405,7 @@ bool SIRegisterInfo::getRegAllocationHints(Register VirtReg,
         continue;
       unsigned HWIdx = getHWRegIndex(PhysReg);
       if (HWIdx >= BankStart && HWIdx < BankEnd)
-        Hints.push_back(PhysReg);
+        Hints.insert(PhysReg);
     }
     return StrictVGPRBankHints || Hint.first == AMDGPURI::StrictBankHint;
   }
@@ -4461,17 +4461,17 @@ bool SIRegisterInfo::getRegAllocationHints(Register VirtReg,
           Phys = VRM->getPhys(HintReg);
         if (Phys && is_contained(Order, Phys) && InFile(Phys) &&
             Preferred.insert(Phys).second)
-          Hints.push_back(Phys);
+          Hints.insert(Phys);
       }
       for (MCPhysReg PhysReg : Order)
         if (!Preferred.count(PhysReg) && InFile(PhysReg))
-          Hints.push_back(PhysReg);
+          Hints.insert(PhysReg);
       return Strict;
     }
 
     for (MCPhysReg PhysReg : Order) {
       if (getHWRegIndex(PhysReg) == TargetIdx && InFile(PhysReg))
-        Hints.push_back(PhysReg);
+        Hints.insert(PhysReg);
     }
     // Strict is a hard constraint. If none matched, allocation fails instead
     // of silently using the other file.
