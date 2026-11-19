@@ -2566,7 +2566,8 @@ bool SIInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
   case AMDGPU::S_SCHEDULE_SGPR_B256:
   case AMDGPU::S_SCHEDULE_SGPR_B512: {
     // Strict exact-register pins are kept through RA so the pinned value keeps
-    // its own def and hint (and, for AGPR, its operand class).
+    // its own def and hint (and, for AGPR, its operand class). If src was tied
+    // to dst, the physical registers match and this emits no copy.
     // The immediates have already been consumed as allocation hints.
     Register Dst = MI.getOperand(0).getReg();
     Register Src = MI.getOperand(1).getReg();
