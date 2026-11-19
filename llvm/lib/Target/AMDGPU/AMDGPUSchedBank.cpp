@@ -17,8 +17,11 @@
 ///      (and source) vreg so the allocator prefers the target bank or register,
 ///   3. propagates the hint through COPY / REG_SEQUENCE / INSERT_SUBREG /
 ///      SUBREG_TO_REG so it survives coalescing, and
-///   4. replaces the pseudo with a plain COPY, except for a strict
-///      exact-register (VGPR/SGPR/AGPR) pin.
+///   4. replaces a soft pin with a plain COPY. A strict pin stays until
+///      expandPostRAPseudo. By default (-amdgpu-strict-pin-tie-src-dst) that
+///      pseudo ties src to dst so RA assigns one physical register. Passing
+///      -amdgpu-strict-pin-tie-src-dst=0 leaves it untied, and a mismatch
+///      then becomes a copy after RA.
 ///
 /// A strict exact-register pseudo is left in place until expandPostRAPseudo.
 /// A plain COPY gets coalesced and the hint can be dropped with it, so the
@@ -46,10 +49,19 @@
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/InitializePasses.h"
+#include "llvm/Support/CommandLine.h"
 
 using namespace llvm;
 
 #define DEBUG_TYPE "amdgpu-sched-bank"
+
+// On by default. A strict pin ties its source to its result before RA, so the
+// allocator assigns one physical register and expandPostRAPseudo does not
+// emit a copy. Turning this off leaves the pseudo untied, and a mismatch
+// becomes a copy after RA.
+static cl::opt<bool> StrictPinTieSrcDst(
+    "amdgpu-strict-pin-tie-src-dst", cl::Hidden, cl::init(true),
+    cl::desc("Tie strict sched.vgpr/sgpr/agpr src to dst"));
 
 /// Classification of schedule-hint pseudos.
 enum ScheduleHintKind { SHK_None, SHK_Bank, SHK_VGPR, SHK_SGPR, SHK_AGPR };
@@ -369,9 +381,12 @@ static bool runScheduleBank(MachineFunction &MF) {
 
       // A strict exact-register pin must keep its own def until after RA:
       // a plain COPY gets coalesced and the hint can be dropped with it. For
-      // AGPR it also keeps the AGPR operand constraint. expandPostRAPseudo
-      // turns the pseudo into a physreg copy.
+      // AGPR it also keeps the AGPR operand constraint. With src tied to dst
+      // the allocator uses one register, so expandPostRAPseudo emits no copy.
       if (Kind != SHK_Bank && Strict) {
+        if (StrictPinTieSrcDst && DstReg.isVirtual() && SrcReg.isVirtual() &&
+            !MI.getOperand(0).getSubReg() && !SrcMO.getSubReg())
+          MI.tieOperands(/*DefIdx=*/0, /*UseIdx=*/1);
         Changed = true;
         continue;
       }

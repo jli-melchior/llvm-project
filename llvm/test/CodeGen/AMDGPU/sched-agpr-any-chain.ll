@@ -8,8 +8,8 @@ declare <4 x float> @llvm.amdgcn.sched.agpr.v4f32(<4 x float>, i32, i32)
 declare <4 x float> @llvm.amdgcn.mfma.f32.16x16x16f16(<4 x half>, <4 x half>, <4 x float>, i32, i32, i32)
 
 ; CHECK-LABEL: name: two_chains
-; CHECK: A_SCHEDULE_AGPR_B128 {{.*}}%{{[0-9]+}}, 0, 1
-; CHECK: A_SCHEDULE_AGPR_B128 {{.*}}%{{[0-9]+}}, 4, 1
+; CHECK: A_SCHEDULE_AGPR_B128 {{.*}}%{{[0-9]+}}(tied-def 0), 0, 1
+; CHECK: A_SCHEDULE_AGPR_B128 {{.*}}%{{[0-9]+}}(tied-def 0), 4, 1
 define amdgpu_kernel void @two_chains(ptr addrspace(1) %out, ptr addrspace(1) %in, i32 %n) #0 {
 entry:
   br label %loop
@@ -38,7 +38,7 @@ exit:
 ; One chain from the MFMA before the loop, through the loop PHI and the
 ; accumulator input of the MFMA after the loop.
 ; CHECK-LABEL: name: loop_chain
-; CHECK-COUNT-3: A_SCHEDULE_AGPR_B128 {{.*}}%{{[0-9]+}}, 0, 1
+; CHECK-COUNT-3: A_SCHEDULE_AGPR_B128 {{.*}}%{{[0-9]+}}(tied-def 0), 0, 1
 ; CHECK-NOT: A_SCHEDULE_AGPR_B128
 ; GCN-LABEL: {{^}}loop_chain:
 ; GCN-NOT: v_accvgpr_mov
@@ -77,8 +77,8 @@ exit:
 
 ; An exact pin takes a0..a3, so the chain starts at a4.
 ; CHECK-LABEL: name: after_exact
-; CHECK: A_SCHEDULE_AGPR_B128 {{.*}}%{{[0-9]+}}, 0, 1
-; CHECK: A_SCHEDULE_AGPR_B128 {{.*}}%{{[0-9]+}}, 4, 1
+; CHECK: A_SCHEDULE_AGPR_B128 {{.*}}%{{[0-9]+}}(tied-def 0), 0, 1
+; CHECK: A_SCHEDULE_AGPR_B128 {{.*}}%{{[0-9]+}}(tied-def 0), 4, 1
 define amdgpu_kernel void @after_exact(ptr addrspace(1) %out, <4 x half> %a, <4 x float> %c, <4 x float> %d) #0 {
   %x = call <4 x float> @llvm.amdgcn.sched.agpr.v4f32(<4 x float> %c, i32 0, i32 1)
   %r = call <4 x float> @llvm.amdgcn.mfma.f32.16x16x16f16(<4 x half> %a, <4 x half> %a, <4 x float> %d, i32 0, i32 0, i32 0)
