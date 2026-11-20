@@ -385,15 +385,51 @@ SILowerSGPRSpills::determineRegsForWWMAllocation(MachineFunction &MF) {
   const GCNSubtarget &ST = MF.getSubtarget<GCNSubtarget>();
   unsigned MaxNumVGPRs = ST.getMaxNumVectorRegs(MF.getFunction()).first;
 
+  // VGPRs named by strict sched.vgpr pins. The pins are still virtual here,
+  // so isPhysRegUsed does not see them, but a WWM register reserved on top of
+  // one leaves the pinned value no register to take.
+  BitVector Pinned(MaxNumVGPRs);
+  for (const MachineBasicBlock &MBB : MF) {
+    for (const MachineInstr &MI : MBB) {
+      switch (MI.getOpcode()) {
+      case AMDGPU::V_SCHEDULE_VGPR_B32:
+      case AMDGPU::V_SCHEDULE_VGPR_B64:
+      case AMDGPU::V_SCHEDULE_VGPR_B128:
+      case AMDGPU::V_SCHEDULE_VGPR_B256:
+      case AMDGPU::V_SCHEDULE_VGPR_B512:
+        break;
+      default:
+        continue;
+      }
+      unsigned RegNum = MI.getOperand(2).getImm();
+      if (RegNum == ~0u || MI.getOperand(3).getImm() == 0)
+        continue;
+      unsigned Size =
+          TRI->getRegSizeInBits(*MRI.getRegClass(MI.getOperand(0).getReg())) /
+          32;
+      unsigned End = std::min(RegNum + Size, MaxNumVGPRs);
+      if (RegNum < End)
+        Pinned.set(RegNum, End);
+    }
+  }
+
   // Try to use the highest available registers for now. Later after
-  // vgpr-regalloc, they can be shifted to the lowest range.
-  for (unsigned Reg = AMDGPU::VGPR0 + MaxNumVGPRs - 1;
-       WWMRegCandidates.size() < MaxNumVGPRsForWwmAllocation &&
-       Reg >= AMDGPU::VGPR0;
-       --Reg) {
-    if (!ReservedRegs.test(Reg) &&
-        !MRI.isPhysRegUsed(Reg, /*SkipRegMaskTest=*/true))
-      WWMRegCandidates.push_back(Reg);
+  // vgpr-regalloc, they can be shifted to the lowest range. Pinned registers
+  // are taken only when the unpinned ones run out, so a function whose pins
+  // cover most of the file still gets a WWM pool instead of an error.
+  for (bool AllowPinned : {false, true}) {
+    for (unsigned Reg = AMDGPU::VGPR0 + MaxNumVGPRs - 1;
+         WWMRegCandidates.size() < MaxNumVGPRsForWwmAllocation &&
+         Reg >= AMDGPU::VGPR0;
+         --Reg) {
+      if (Pinned.test(TRI->getHWRegIndex(Reg)) != AllowPinned)
+        continue;
+      if (!ReservedRegs.test(Reg) &&
+          !MRI.isPhysRegUsed(Reg, /*SkipRegMaskTest=*/true))
+        WWMRegCandidates.push_back(Reg);
+    }
+    if (Pinned.none())
+      break;
   }
 
   return WWMRegCandidates;
@@ -426,8 +462,12 @@ void SILowerSGPRSpills::assignWWMRegs(MachineFunction &MF,
         "cannot find enough VGPRs for wwm-regalloc");
   }
 
-  BitVector PerLaneVGPRMask(WwmRegMask);
-  PerLaneVGPRMask.flip().clearBitsNotInMask(TRI->getAllVGPRRegMask());
+  // Every VGPR outside the pool, including those above v255 on targets with
+  // 1024 addressable VGPRs, which the AllVGPRs regmask does not cover.
+  BitVector PerLaneVGPRMask(TRI->getNumRegs());
+  for (MCPhysReg Reg : AMDGPU::VGPR_32RegClass)
+    if (!WwmRegMask.test(Reg))
+      PerLaneVGPRMask.set(Reg);
 
   // The complement set will be the registers for per-lane VGPR allocation.
   FuncInfo->updatePerLaneVGPRMask(PerLaneVGPRMask);
